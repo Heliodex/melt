@@ -1,0 +1,16 @@
+{
+	"name": "melt",
+	"tree": {
+		"$className": "DataModel",
+
+		"ReplicatedStorage": {
+			"$path": "src/shared"
+		},
+
+		"StarterPlayer": {
+			"StarterPlayerScripts": {
+				"$path": "src/client"
+			}
+		}
+	}
+}
