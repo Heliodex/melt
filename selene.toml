@@ -1,4 +1,1 @@
-std = "roblox+melt"
-
-[lints]
-global_usage = "allow"
+std = "mercury"
