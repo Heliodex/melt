@@ -17,11 +17,14 @@ local function initiate()
 end
 
 local toolbar = plugin:CreateToolbar "Mercury Sync"
-local button = toolbar:CreateButton(
-	"", -- The text next to the icon. Leave this blank if the icon is sufficient.
-	"Sync!", -- hover text
-	"icon.png" -- The icon file's name. Make sure you change it to your own icon file's name!
-)
+
+local buttons = {
+	toolbar:CreateButton(
+		"", -- The text next to the icon. Leave this blank if the icon is sufficient.
+		"Sync!", -- hover text
+		"icon.png" -- The icon file's name. Make sure you change it to your own icon file's name!
+	),
+}
 
 local Fusion = LoadLibrary "RbxFusion"
 
@@ -29,6 +32,9 @@ local New = Fusion.New
 local Children = Fusion.Children
 local Value = Fusion.Value
 local Spring = Fusion.Spring
+-- local Tween = Fusion.Tween
+-- local TweenInfo = Fusion.TweenInfo
+local Observer = Fusion.Observer
 local peek = Fusion.peek
 
 local g
@@ -69,28 +75,34 @@ local function gui()
 	return g
 end
 
-local function notifyCount()
-	local count = 0
-	for _, _ in pairs(notifications) do
-		count = count + 1
-	end
-	return count
-end
-
 local idCount = 0
+local nCount = 0
 
 local function notify(text)
-	local startCount = notifyCount()
-	local position = Value(UDim2.new(0, -WIDTH, 0, 60 * (startCount + 1) - 50))
-	local transparency = Value(0)
-
+	nCount = nCount + 1
 	idCount = idCount + 1
 	local id = idCount
+
+	local position = Value(UDim2.new(0, -WIDTH, 0, 60 * nCount - 50))
+	local transparency = Value(0)
+	local textValue = Value(text)
+	local textChanged = Observer(textValue)
+	local arrowRotation = Value(0)
+	local done = Value(false)
+	local background = Value(Color3.new())
+	local backgroundSpring = Spring(background, 4)
+	local start = tick()
+
+	local disconn = textChanged:onChange(function()
+		if tick() - start > 0.5 then -- don't change color if it's just appearing
+			backgroundSpring:setPosition(Color3.new(0.4, 0.4, 0.4))
+		end
+	end)
 
 	local t = New "Frame" {
 		Name = "Notification",
 		Parent = gui().Notifications,
-		BackgroundColor3 = Color3.new(),
+		BackgroundColor3 = backgroundSpring,
 		BackgroundTransparency = Spring(transparency, 15),
 		BorderSizePixel = 0,
 		Position = Spring(position, 15),
@@ -98,16 +110,25 @@ local function notify(text)
 
 		[Children] = {
 			New "ImageLabel" {
-				Image = "rbxasset://../../../Plugins/TestPlugin/icon2.png",
+				Name = "InnerIcon",
+				Image = "rbxasset://../../../Plugins/TestPlugin/innerIcon.png",
 				BackgroundTransparency = 1,
 				Position = UDim2.new(0, 5, 0, 5),
+				Size = UDim2.new(0, 40, 0, 40),
+			},
+			New "ImageLabel" {
+				Name = "OuterIcon",
+				Image = "rbxasset://../../../Plugins/TestPlugin/outerIcon.png",
+				BackgroundTransparency = 1,
+				Position = UDim2.new(0, 5, 0, 5),
+				Rotation = Spring(arrowRotation),
 				Size = UDim2.new(0, 40, 0, 40),
 			},
 			New "TextLabel" {
 				Position = UDim2.new(0, 50, 0, 0),
 				Size = UDim2.new(1, -60, 1, 0),
 				BackgroundTransparency = 1,
-				Text = text,
+				Text = textValue,
 				TextWrapped = true,
 				TextColor3 = Color3.new(1, 1, 1),
 				Font = Enum.Font.SourceSans,
@@ -117,48 +138,81 @@ local function notify(text)
 			},
 		},
 	}
-	local tbl = {
-		obj = t,
-		pos = position,
-	}
-	notifications[id] = tbl
 
-	position:set(peek(position) + UDim2.new(0, WIDTH, 0, 0))
-	transparency:set(0.5)
-	wait(3)
+	Spawn(function()
+		local tbl = {
+			obj = t,
+			pos = position,
+		}
 
-	position:set(UDim2.new(0, 0, 0, -60))
-	transparency:set(1)
+		notifications[id] = tbl
 
-	notifications[id] = nil
+		position:set(peek(position) + UDim2.new(0, WIDTH, 0, 0))
+		transparency:set(0.5)
 
-	for _, v in pairs(notifications) do
-		if peek(v.pos).Y.Offset > peek(position).Y.Offset then
-			v.pos:set(peek(v.pos) - UDim2.new(0, 0, 0, 60))
+		repeat
+			wait(1)
+		until peek(done)
+
+		wait(3)
+
+		position:set(UDim2.new(0, 0, 0, -60))
+		transparency:set(1)
+
+		notifications[id] = nil
+		nCount = nCount - 1
+
+		for _, v in pairs(notifications) do
+			if peek(v.pos).Y.Offset > peek(position).Y.Offset then
+				v.pos:set(peek(v.pos) - UDim2.new(0, 0, 0, 60))
+			end
 		end
-	end
 
-	wait(1)
-	t:Destroy()
+		wait(1)
+		disconn()
+		t:Destroy()
+	end)
+
+	return {
+		text = textValue,
+		arrowRotation = arrowRotation,
+		done = done,
+	}
 end
 
 local debounce
-button.Click:connect(function()
+
+buttons[1].Click:connect(function()
 	if debounce then
 		return
 	end
 	debounce = true
 	initiate()
 
-	local ok, res = ypcall(function()
-		return HttpService:GetAsync "http://localhost:2013/"
+	local n = notify "Syncing..."
+
+	Spawn(function()
+		while not peek(n.done) do
+			n.arrowRotation:set(peek(n.arrowRotation) + 180)
+			wait(0.9)
+		end
 	end)
 
-	if ok then
-		notify("Synced: " .. res)
-	else
-		notify "Failed to sync! Is Mercury Sync Server running?"
-	end
+	Spawn(function()
+		local ok, res = ypcall(function()
+			return HttpService:GetAsync(
+				"http://localhost:2013/sync?" .. tick() * 10000
+				-- nocache parameter doesn't work
+			)
+		end)
 
-	debounce = false
+		if ok then
+			n.text:set("Synced: " .. res)
+		else
+			n.text:set "Failed to sync! Is Mercury Sync Server running?"
+		end
+		n.done:set(true)
+
+		debounce = false
+	end)
 end)
