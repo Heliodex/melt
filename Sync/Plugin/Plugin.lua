@@ -78,7 +78,7 @@ end
 local idCount = 0
 local nCount = 0
 
-local function notify(text)
+local function notify(text, willUpdate)
 	nCount = nCount + 1
 	idCount = idCount + 1
 	local id = idCount
@@ -86,18 +86,23 @@ local function notify(text)
 	local position = Value(UDim2.new(0, -WIDTH, 0, 60 * nCount - 50))
 	local transparency = Value(0)
 	local textValue = Value(text)
-	local textChanged = Observer(textValue)
+	local textChanged
 	local arrowRotation = Value(0)
-	local done = Value(false)
+	local done = Value(not willUpdate)
 	local background = Value(Color3.new())
 	local backgroundSpring = Spring(background, 4)
 	local start = tick()
 
-	local disconn = textChanged:onChange(function()
-		if tick() - start > 0.5 then -- don't change color if it's just appearing
-			backgroundSpring:setPosition(Color3.new(0.4, 0.4, 0.4))
-		end
-	end)
+	local disconn = function() end
+
+	if willUpdate then
+		textChanged = Observer(textValue)
+		disconn = textChanged:onChange(function()
+			if tick() - start > 0.5 then -- don't change color if it's just appearing
+				backgroundSpring:setPosition(Color3.new(0.4, 0.4, 0.4))
+			end
+		end)
+	end
 
 	local t = New "Frame" {
 		Name = "Notification",
@@ -173,11 +178,70 @@ local function notify(text)
 		t:Destroy()
 	end)
 
-	return {
-		text = textValue,
-		arrowRotation = arrowRotation,
-		done = done,
-	}
+	if willUpdate then
+		return {
+			text = textValue,
+			arrowRotation = arrowRotation,
+			done = done,
+		}
+	end
+	return
+end
+
+local function makeScript(s) -- because no continue
+	local path = s.path -- { "ServerScriptService", "script" }
+	local content = s.content
+	local type = s.type
+
+	local obj = game
+	local ok2 = pcall(function()
+		for i = 1, #path - 1 do
+			obj = obj:FindFirstChild(path[i])
+			if not obj then
+				local folder = Instance.new "Model"
+				folder.Name = path[i]
+				folder.Parent = obj
+				obj = folder
+			end
+		end
+	end)
+	if not ok2 then
+		notify(
+			"Failed to sync "
+				.. table.concat(path, ".")
+				.. "! Is the path correct?"
+		)
+		return
+	end
+
+	local name = path[#path]
+	local existingObj = obj:FindFirstChild(name)
+	if existingObj then
+		if existingObj:IsA "Script" then
+			existingObj.Source = content
+		else
+			notify(
+				"Object already exists at path "
+					.. table.concat(path, ".")
+					.. "! Please remove it and try again."
+			)
+			return
+		end
+	else
+		local createScript
+
+		if type == "server" then
+			createScript = Instance.new "Script"
+		elseif type == "client" then
+			createScript = Instance.new "LocalScript"
+		else
+			return
+		end
+
+		createScript.Name = name
+		createScript.Source = content
+		createScript.Parent = obj
+	end
 end
 
 local debounce
@@ -189,7 +253,7 @@ buttons[1].Click:connect(function()
 	debounce = true
 	initiate()
 
-	local n = notify "Syncing..."
+	local n = notify("Syncing...", true)
 
 	Spawn(function()
 		while not peek(n.done) do
@@ -206,13 +270,34 @@ buttons[1].Click:connect(function()
 			)
 		end)
 
-		if ok then
-			n.text:set("Synced: " .. res)
-		else
-			n.text:set "Failed to sync! Is Mercury Sync Server running?"
+		local function finish()
+			n.done:set(true)
+			wait(0.05)
+			debounce = false
 		end
-		n.done:set(true)
 
-		debounce = false
+		if not ok then
+			n.text:set "Failed to sync! Is Mercury Sync Server running?"
+			finish()
+			return
+		end
+
+		n.text:set "Decoding..."
+		local json = HttpService:JSONDecode(res) -- { files }
+
+		if not json.files or json.files == "null" then
+			n.text:set "No files to sync!"
+			finish()
+			return
+		end
+		n.text:set "Applying..."
+
+		for _, v in pairs(json.files) do -- { path, content, type }
+			makeScript(v)
+		end
+
+		n.text:set "Successfully synchronised!"
+
+		finish()
 	end)
 end)
