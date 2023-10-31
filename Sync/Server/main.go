@@ -51,9 +51,8 @@ func main() {
 			// Message string `json:"message"`
 		}
 
-		usedFilenames := make(map[string]bool)
+		usedScripts := make(map[string]bool)
 		// Read files recursively and send them to the client
-		fmt.Println(target)
 		filepath.Walk(target, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				fmt.Println(c.InRed("Error while reading file:"), err.Error())
@@ -83,6 +82,7 @@ func main() {
 			// Trim target directory and extension from path, and remove suffix if it's a server/client script
 			formatPath := strings.TrimPrefix(path, target+string(os.PathSeparator))
 			formatPath = strings.TrimSuffix(formatPath, "."+filetype)
+
 			if strings.Contains(formatPath, ".") {
 				scripttype = strings.Split(formatPath, ".")[1]
 				if scripttype == "server" || scripttype == "client" {
@@ -94,19 +94,26 @@ func main() {
 				fmt.Println(c.InRed("Unknown script type: ") + c.InUnderline(c.InPurple(formatPath)) + c.InRed("!"))
 				fmt.Println(c.InYellow("If you were trying to sync a ModuleScript, these are not supported by Mercury Sync. Please transpose them manually."))
 			}
-			formatPath = strings.ReplaceAll(formatPath, string(os.PathSeparator), ".")
+			formatPath = strings.ReplaceAll(formatPath, string(os.PathSeparator), "$dot$")
 
-			if usedFilenames[formatPath] {
-				fmt.Println(c.InRed("Duplicate filename: ") + c.InUnderline(c.InPurple(formatPath)) + c.InRed("! Skipping..."))
+			filename := strings.Split(formatPath, "$dot$")[len(strings.Split(formatPath, "$dot$"))-1]
+			if filename == "init" {
+				formatPath = strings.TrimSuffix(formatPath, "$dot$init")
+			}
+
+			dottedPath := strings.ReplaceAll(formatPath, "$dot$", ".")
+
+			if usedScripts[formatPath] {
+				fmt.Println(c.InRed("Duplicate filename: ") + c.InUnderline(c.InPurple(dottedPath)) + c.InRed("! Skipping..."))
 				return nil
 			}
-			usedFilenames[formatPath] = true
+			usedScripts[formatPath] = true
 
 			var content string
 
 			switch filetype {
 			case "luau":
-				fmt.Println(c.InBlue("Compiling ") + c.InUnderline(c.InPurple(formatPath)) + c.InBlue("..."))
+				fmt.Println(c.InBlue("Compiling  ") + c.InUnderline(c.InPurple(dottedPath)) + c.InBlue("..."))
 				content, err = CompileLuau(path)
 				if err != nil {
 					fmt.Println(c.InRed("Error while compiling Luau file:"), err)
@@ -126,13 +133,19 @@ func main() {
 				content = string(file)
 			}
 
-			fmt.Println(c.InGreen("Sending ") + c.InUnderline(c.InPurple(formatPath)) + c.InGreen("..."))
+			fmt.Println(c.InGreen("Sending    ") + c.InUnderline(c.InPurple(dottedPath)) + c.InGreen("..."))
 
-			Response.Files = append(Response.Files, File{
-				Path:    strings.Split(formatPath, "."),
+			scriptFile := File{
+				Path:    strings.Split(formatPath, "$dot$"),
 				Content: strings.ReplaceAll(content, "\r\n", "\n"),
 				Type:    scripttype,
-			})
+			}
+
+			if filename == "init" {
+				Response.Files = append([]File{scriptFile}, Response.Files...)
+			} else {
+				Response.Files = append(Response.Files, scriptFile)
+			}
 
 			return nil
 		})
