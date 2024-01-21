@@ -24,14 +24,28 @@ const (
 	// Literals
 	IDENTIFIER = "IDENTIFIER"
 	NUMBER     = "NUMBER"
+	COMMENT    = "COMMENT"
+	STRING     = "STRING"
+	KEYWORD    = "KEYWORD"
 
 	// Operators
 	EQUALS = "EQUALS"
 
-	// that's all for now
+	// OPEN_BRACE  = "OPEN_BRACE"
+	// CLOSE_BRACE = "CLOSE_BRACE"
 )
 
 func lex(source string) []token {
+	keywords := map[string]bool{
+		"if":       true,
+		"elseif":   true,
+		"else":     true,
+		"loop":     true,
+		"for":      true,
+		"break":    true,
+		"continue": true,
+	}
+
 	var tokens []token
 
 	last := func(n int) token {
@@ -39,10 +53,20 @@ func lex(source string) []token {
 	}
 	line := 1
 	column := 0
-	addToken := func(kind string, value string) {
-		tokens = append(tokens, token{line, column, kind, value})
+
+	addToken := func(kind string, value string, linecol ...int) {
+		currentLine := line
+		currentColumn := column
+		if len(linecol) > 0 {
+			currentLine = linecol[0]
+		}
+		if len(linecol) > 1 {
+			currentColumn = linecol[1]
+		}
+		tokens = append(tokens, token{currentLine, currentColumn, kind, value})
 	}
 
+ParseLoop:
 	for i := 0; i < len(source); i++ {
 		char := source[i]
 		column++
@@ -56,39 +80,86 @@ func lex(source string) []token {
 		case ' ':
 			addToken(SPACE, " ")
 		case '\t':
-			if len(tokens) == 0 {
-				fmt.Println(c.InRed("error bruh"))
-				os.Exit(1)
-			}
 			// only if last token is a newline or an indent
 			if last(1).kind == NEWLINE || last(1).kind == INDENT {
 				addToken(INDENT, "\t")
+				column += 3
 			} else {
 				addToken(SPACE, "\t")
 			}
+		case ';':
+			// parse till end of line
+			startColumn := column
+			i++ // skip the semicolon
+			var comment string
+			for i < len(source) && source[i] != '\n' {
+				comment += string(source[i])
+				column++
+				i++
+			}
+			column--
+			i--
+			addToken(COMMENT, comment, line, startColumn)
+		case '"':
+			startLine := line
+			startColumn := column
+
+			var stringLiteral string
+			
+			column++
+			i++ // skip the first quote
+			for i < len(source) && source[i] != '"' {
+				stringLiteral += string(source[i])
+				column++
+				i++
+			}
+
+			addToken(STRING, stringLiteral, startLine, startColumn)
 		default:
 			if char >= '0' && char <= '9' {
-				// keep going until we hit a non-number
+				startLine := line
+				startColumn := column
+
 				var number string
+
+				// keep going until we hit a non-number
 				for i < len(source) && source[i] >= '0' && source[i] <= '9' {
 					number += string(source[i])
 					column++
 					i++
 				}
+				column--
 				i--
-				addToken(NUMBER, number)
+				addToken(NUMBER, number, startLine, startColumn)
 			} else if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' {
+				startLine := line
+				startColumn := column
 				// keep going until we hit a non-letter
-				var identifier string
-				for i < len(source) && source[i] >= 'a' && source[i] <= 'z' || source[i] >= 'A' && source[i] <= 'Z' {
-					identifier += string(source[i])
+				var identifierOrKeyword string
+
+				for i < len(source) && (source[i] >= 'a' && source[i] <= 'z' || source[i] >= 'A' && source[i] <= 'Z') {
+					identifierOrKeyword += string(source[i])
 					column++
 					i++
 				}
+				column--
 				i--
-				addToken(IDENTIFIER, identifier)
+
+				// check if it's a keyword
+				if keywords[identifierOrKeyword] {
+					addToken(KEYWORD, identifierOrKeyword, startLine, startColumn)
+					continue ParseLoop
+				}
+
+				if i == len(source) {
+					// you can't end a program with an identifier (yet)
+					fmt.Println(c.InRed("cant end program with identifier"))
+					os.Exit(1)
+				}
+
+				addToken(IDENTIFIER, identifierOrKeyword, startLine, startColumn)
 			} else {
-				fmt.Println(c.InRed("error bruh"))
+				fmt.Println(c.InRed("that isnt a valid character"), c.InYellow(string(char)))
 				os.Exit(1)
 			}
 		}
@@ -125,12 +196,23 @@ func main() {
 	sourceString := strings.Replace(string(source), "\r\n", "\n", -1)
 
 	tokens := lex(sourceString)
-	// ast := parse(tokens)
-	// out := generate(ast)
+	// out := generate(tokens)
 
 	for _, token := range tokens {
-		fmt.Printf("%d:%d %s %s\n", token.line, token.column, c.InYellow(token.kind), c.InGreen(token.value))
-	}
+		if token.kind == "SPACE" {
+			continue
+		}
+		if token.kind == "NEWLINE" {
+			fmt.Println("──────┼─────────────┼─────────────────────────────")
+			continue
+		}
+		toPrint := []string{
+			fmt.Sprintf("%d:%d", token.line, token.column),
+			c.InYellow(token.kind),
+			c.InPurple(token.value),
+		}
 
-	fmt.Println("success")
+		// print in a nice format
+		fmt.Printf("%-5s │ %-20s │ %s\n", toPrint[0], toPrint[1], toPrint[2])
+	}
 }

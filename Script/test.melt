@@ -1,0 +1,15 @@
+x = 1 ; comments with semicolons
+
+print "x is {x}" ; %x?
+print "double x is {2x}"
+if x is 1
+	print "x is equal to 1" ; here we go
+elseif x
+	print "x is truthy"
+else
+	print "x is falsy"
+
+loop
+	print "infinite loop"
+	print "just kidding"
+	break
