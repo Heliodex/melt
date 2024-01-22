@@ -29,23 +29,47 @@ const (
 	KEYWORD    = "KEYWORD"
 
 	// Operators
-	EQUALS = "EQUALS"
+	TEXTOPERATOR = "TEXTOPERATOR"
+	EQUALS       = "EQUALS"
+
+	PLUS       = "PLUS"
+	PLUSPLUS   = "PLUSPLUS"
+	PLUSEQUALS = "PLUSEQUALS"
+
+	MINUS       = "MINUS"
+	MINUSMINUS  = "MINUSMINUS"
+	MINUSEQUALS = "MINUSEQUALS"
+
+	TIMES  = "TIMES"
+	DIVIDE = "DIVIDE"
+	MODULO = "MODULO"
 
 	// OPEN_BRACE  = "OPEN_BRACE"
 	// CLOSE_BRACE = "CLOSE_BRACE"
 )
 
-func lex(source string) []token {
-	keywords := map[string]bool{
-		"if":       true,
-		"elseif":   true,
-		"else":     true,
-		"loop":     true,
-		"for":      true,
-		"break":    true,
-		"continue": true,
-	}
+var keywords = map[string]bool{
+	"if":       true,
+	"elseif":   true,
+	"else":     true,
+	"loop":     true,
+	"for":      true,
+	"break":    true,
+	"continue": true,
+}
 
+var textOperators = map[string]bool{
+	"is":  true,
+	"and": true,
+	"or":  true,
+	"not": true,
+	// "nand": true,
+	// "xor":  true,
+	// "nor":  true,
+	// "xnor": true,
+}
+
+func lex(source string) []token {
 	var tokens []token
 
 	last := func(n int) token {
@@ -105,7 +129,7 @@ ParseLoop:
 			startColumn := column
 
 			var stringLiteral string
-			
+
 			column++
 			i++ // skip the first quote
 			for i < len(source) && source[i] != '"' {
@@ -114,7 +138,45 @@ ParseLoop:
 				i++
 			}
 
+			if i == len(source) {
+				fmt.Println(c.InRed("unclosed string literal"))
+				os.Exit(1)
+			}
+
 			addToken(STRING, stringLiteral, startLine, startColumn)
+
+		case '+':
+			// check if it's a ++ or += or just a +
+			if i+1 < len(source) && source[i+1] == '+' {
+				addToken(PLUSPLUS, "++")
+				i++
+				column++
+			} else if i+1 < len(source) && source[i+1] == '=' {
+				addToken(PLUSEQUALS, "+=")
+				i++
+				column++
+			} else {
+				addToken(PLUS, "+")
+			}
+		case '-':
+			// check if it's a -- or -= or just a -
+			if i+1 < len(source) && source[i+1] == '-' {
+				addToken(MINUSMINUS, "--")
+				i++
+				column++
+			} else if i+1 < len(source) && source[i+1] == '=' {
+				addToken(MINUSEQUALS, "-=")
+				i++
+				column++
+			} else {
+				addToken(MINUS, "-")
+			}
+		case '*':
+			addToken(TIMES, "*")
+		case '/':
+			addToken(DIVIDE, "/")
+		case '%':
+			addToken(MODULO, "%")
 		default:
 			if char >= '0' && char <= '9' {
 				startLine := line
@@ -137,24 +199,34 @@ ParseLoop:
 				// keep going until we hit a non-letter
 				var identifierOrKeyword string
 
-				for i < len(source) && (source[i] >= 'a' && source[i] <= 'z' || source[i] >= 'A' && source[i] <= 'Z') {
+				for i < len(source) &&
+					(source[i] >= 'a' && source[i] <= 'z' ||
+						source[i] >= 'A' && source[i] <= 'Z' ||
+						source[i] >= '0' && source[i] <= '9') {
 					identifierOrKeyword += string(source[i])
 					column++
 					i++
-				}
-				column--
-				i--
-
-				// check if it's a keyword
-				if keywords[identifierOrKeyword] {
-					addToken(KEYWORD, identifierOrKeyword, startLine, startColumn)
-					continue ParseLoop
 				}
 
 				if i == len(source) {
 					// you can't end a program with an identifier (yet)
 					fmt.Println(c.InRed("cant end program with identifier"))
 					os.Exit(1)
+				}
+
+				column--
+				i--
+
+				// check if it's a text operator
+				if textOperators[identifierOrKeyword] {
+					addToken(TEXTOPERATOR, identifierOrKeyword, startLine, startColumn)
+					continue ParseLoop
+				}
+
+				// check if it's a keyword
+				if keywords[identifierOrKeyword] {
+					addToken(KEYWORD, identifierOrKeyword, startLine, startColumn)
+					continue ParseLoop
 				}
 
 				addToken(IDENTIFIER, identifierOrKeyword, startLine, startColumn)
@@ -166,6 +238,80 @@ ParseLoop:
 	}
 
 	return tokens
+}
+
+func generate(tokens []token) string {
+	var output string
+
+	for i := 0; i < len(tokens); i++ {
+		currentToken := tokens[i]
+
+		nextToken := func(n int) token {
+			// gets the nth token after the current token
+			// skips over spaces and newlines
+			for i+n < len(tokens) {
+				if tokens[i+n].kind == SPACE || tokens[i+n].kind == NEWLINE {
+					n++
+				} else {
+					return tokens[i+n]
+				}
+			}
+			return token{}
+		}
+
+		usedIdentifiers := map[string]bool{}
+
+		switch currentToken.kind {
+		case NEWLINE:
+			output += "\n"
+		case INDENT:
+			output += "\t"
+		case NUMBER:
+			output += currentToken.value
+		case STRING:
+			output += fmt.Sprintf("\"%s\"", currentToken.value)
+		case IDENTIFIER:
+			nextKind := nextToken(1).kind
+			switch nextKind {
+			case EQUALS:
+				// variable assignment
+				if !usedIdentifiers[currentToken.value] {
+					output += "local "
+				}
+				output += currentToken.value
+				usedIdentifiers[currentToken.value] = true
+			case PLUSPLUS:
+				output += currentToken.value + " = " + currentToken.value + " + 1"
+				i++
+			case MINUSMINUS:
+				output += currentToken.value + " = " + currentToken.value + " - 1"
+				i++
+			default:
+				output += currentToken.value + " "
+			}
+		case EQUALS:
+			output += " = "
+		case COMMENT:
+			output += " --" + currentToken.value
+		case TEXTOPERATOR:
+			switch currentToken.value {
+			case "is":
+				output += "== "
+			default:
+				output += currentToken.value
+			}
+		// case KEYWORD:
+		// 	switch currentToken.value {
+		// 	case "loop":
+		// 		output += "while true do"
+		// 	default:
+		// 		output += currentToken.value
+		// 	}
+		// 	output += " "
+		}
+	}
+
+	return output
 }
 
 func main() {
@@ -194,25 +340,30 @@ func main() {
 
 	// replace \r\n with \n
 	sourceString := strings.Replace(string(source), "\r\n", "\n", -1)
+	// remove trailing newlines
+	sourceString = strings.TrimRight(sourceString, "\n")
 
 	tokens := lex(sourceString)
-	// out := generate(tokens)
 
 	for _, token := range tokens {
 		if token.kind == "SPACE" {
 			continue
 		}
 		if token.kind == "NEWLINE" {
-			fmt.Println("──────┼─────────────┼─────────────────────────────")
+			fmt.Println("────────────────┼───────────────┼─────────────────────────────")
 			continue
 		}
-		toPrint := []string{
-			fmt.Sprintf("%d:%d", token.line, token.column),
+		toPrint := []any{
+			fmt.Sprintf("%s:%d:%d", target, token.line, token.column),
 			c.InYellow(token.kind),
 			c.InPurple(token.value),
 		}
 
 		// print in a nice format
-		fmt.Printf("%-5s │ %-20s │ %s\n", toPrint[0], toPrint[1], toPrint[2])
+		fmt.Printf("%-15s │ %-22s │ %s\n", toPrint...)
 	}
+
+	out := generate(tokens)
+
+	fmt.Println(out)
 }
