@@ -300,14 +300,124 @@ func generate(tokens []token) string {
 			default:
 				output += currentToken.value
 			}
-		// case KEYWORD:
-		// 	switch currentToken.value {
-		// 	case "loop":
-		// 		output += "while true do"
-		// 	default:
-		// 		output += currentToken.value
-		// 	}
-		// 	output += " "
+		case KEYWORD:
+			parseCond := func() {
+				i++ // skip the keyword
+				var cond string
+				for i < len(tokens) && tokens[i].kind != NEWLINE {
+
+					switch tokens[i].kind {
+					case TEXTOPERATOR:
+						switch tokens[i].value {
+						case "is":
+							cond += "=="
+						default:
+							cond += tokens[i].value
+						}
+					default:
+						cond += tokens[i].value
+					}
+					i++
+				}
+				fmt.Println(c.InRed("cond"), cond)
+				output += cond
+			}
+			hasBlock := false
+			endAfter := false
+			switch currentToken.value {
+			case "loop":
+				output += "while true do"
+				i++
+				hasBlock = true
+				endAfter = true
+			case "if":
+				output += "if"
+				hasBlock = true
+				parseCond()
+				output += " then"
+			case "elseif":
+				output += "elseif"
+				hasBlock = true
+				parseCond()
+				output += " then"
+			case "else":
+				output += "else"
+				i++ // skip the keyword
+				hasBlock = true
+				endAfter = true
+			case "for":
+				output += "for"
+				hasBlock = true
+				endAfter = true
+				parseCond()
+				output += " do"
+			default:
+				output += currentToken.value
+			}
+			output += " "
+
+			if hasBlock {
+				var block []token
+
+				// if next token isn't a newline then error
+				if tokens[i].kind != NEWLINE {
+					fmt.Println(c.InRed("expected newline after keyword"), c.InYellow(tokens[i-1].kind), c.InYellow(tokens[i-1].value))
+					fmt.Println(c.InRed("got"), c.InYellow(tokens[i].kind), c.InYellow(tokens[i].value))
+					os.Exit(1)
+				}
+
+				i++
+
+				// if next token isn't an indent then error
+				if tokens[i].kind != INDENT {
+					fmt.Println(c.InRed("expected indent after newline"))
+					fmt.Println(c.InRed("got"), c.InYellow(tokens[i].kind), c.InYellow(tokens[i].value))
+					os.Exit(1)
+				}
+
+				// get the indent level of the next line
+				indentLevel := 0
+				for i < len(tokens) && tokens[i].kind == INDENT {
+					indentLevel++
+					i++
+				}
+				i--
+				output += "\n"
+
+				currentIndent := 0
+
+				// keep getting tokens until we hit an indent level less than the current one
+				for i < len(tokens) {
+					if tokens[i].kind == INDENT {
+						currentIndent++
+					} else if tokens[i].kind == NEWLINE {
+						currentIndent = 0
+					} else if currentIndent < indentLevel {
+						break
+					}
+
+					if tokens[i].kind != INDENT || currentIndent > indentLevel {
+						block = append(block, tokens[i])
+					}
+					i++
+				}
+				i--
+
+				// remove trailing newlines
+				for block[len(block)-1].kind == NEWLINE {
+					block = block[:len(block)-1]
+				}
+
+				parsedBlock := generate(block)
+
+				// place an indent before every line
+				parsedBlock = strings.Replace("\t"+parsedBlock, "\n", "\n\t", -1)
+
+				output += parsedBlock + "\n"
+				if endAfter {
+					output += "end\n\n"
+				}
+			}
 		}
 	}
 
