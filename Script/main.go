@@ -8,11 +8,66 @@ import (
 	c "github.com/TwiN/go-color"
 )
 
-type token struct {
-	line   int
-	column int
+type Token struct {
 	kind   string
 	value  string
+	line   int
+	column int
+}
+
+type Node interface{}
+
+// Who needs statements when you can have expressions?
+type Expr interface {
+	Node
+}
+
+type Identifier struct {
+	startToken Token
+	name       string
+}
+
+type AssignmentExpr struct {
+	startToken Token
+	left       Expr
+	right      Expr
+}
+
+type BinaryExpr struct {
+	startToken Token
+	left       Expr
+	right      Expr
+}
+
+func (b BinaryExpr) Kind() string {
+	return "BinaryExpr"
+}
+
+type UnaryExpr struct {
+	startToken Token
+	expr       Expr
+}
+
+type IfExpr struct {
+	startToken Token
+	condition  Expr
+	block      BlockExpr
+}
+
+type ElseIfExpr struct {
+	startToken Token
+	condition  Expr
+	block      BlockExpr
+}
+
+type ElseExpr struct {
+	startToken Token
+	block      BlockExpr
+}
+
+type BlockExpr struct {
+	startNode   Node
+	expressions []Expr
 }
 
 const (
@@ -63,16 +118,126 @@ var textOperators = map[string]bool{
 	"and": true,
 	"or":  true,
 	"not": true,
-	// "nand": true,
-	// "xor":  true,
-	// "nor":  true,
-	// "xnor": true,
 }
 
-func lex(source string) []token {
-	var tokens []token
+func parse(tokens []Token) []Expr {
+	var program []Expr
 
-	last := func(n int) token {
+	addExpr := func(expr Expr) {
+		program = append(program, expr)
+	}
+
+	for i := 0; i < len(tokens); i++ {
+		token := tokens[i]
+		currentIndent := 0
+
+		getBlock := func() []Token {
+			// get tokens until the end of the block (which is the same indent level as the if statement)
+			var blockTokens []Token
+			blockIndent := 0
+
+			// skip newline at start
+			i++
+
+			for i < len(tokens) {
+				if tokens[i].kind == NEWLINE {
+					blockIndent = 0
+					// check next few tokens to see if they're indented
+					for j := i + 1; j < len(tokens) && tokens[j].kind == INDENT; j++ {
+						blockIndent++
+					}
+					if blockIndent <= currentIndent {
+						break
+					}
+				}
+				blockTokens = append(blockTokens, tokens[i])
+				i++
+			}
+
+			return blockTokens
+		}
+
+		getCondition := func() []Token {
+			var condTokens []Token
+
+			// skip the keyword
+			i++
+
+			// get all tokens until the end of the line
+			for i < len(tokens) && tokens[i+1].kind != NEWLINE {
+				i++
+				condTokens = append(condTokens, tokens[i])
+			}
+
+			// skip the newline
+			i++
+
+			return condTokens
+		}
+
+		switch token.kind {
+		case INDENT:
+			currentIndent++
+		case NEWLINE:
+			currentIndent = 0
+		case KEYWORD:
+			switch token.value {
+			case "if":
+				condTokens := getCondition()
+				blockTokens := getBlock()
+
+				fmt.Println("cond tokens: ", condTokens)
+				fmt.Println("block tokens:", blockTokens)
+
+				addExpr(IfExpr{
+					startToken: token,
+					condition:  parse(condTokens),
+					block: BlockExpr{
+						startNode:   token,
+						expressions: parse(blockTokens),
+					},
+				})
+			case "elseif":
+				condTokens := getCondition()
+				blockTokens := getBlock()
+
+				fmt.Println("cond tokens: ", condTokens)
+				fmt.Println("block tokens:", blockTokens)
+
+				addExpr(ElseIfExpr{
+					startToken: token,
+					condition:  parse(condTokens),
+					block: BlockExpr{
+						startNode:   token,
+						expressions: parse(blockTokens),
+					},
+				})
+			case "else":
+				// skip newline
+				i++
+
+				blockTokens := getBlock()
+
+				fmt.Println("block tokens:", blockTokens)
+
+				addExpr(ElseExpr{
+					startToken: token,
+					block: BlockExpr{
+						startNode:   token,
+						expressions: parse(blockTokens),
+					},
+				})
+			}
+		}
+	}
+
+	return program
+}
+
+func lex(source string) []Token {
+	var tokens []Token
+
+	last := func(n int) Token {
 		return tokens[len(tokens)-n]
 	}
 	line := 1
@@ -87,7 +252,13 @@ func lex(source string) []token {
 		if len(linecol) > 1 {
 			currentColumn = linecol[1]
 		}
-		tokens = append(tokens, token{currentLine, currentColumn, kind, value})
+
+		tokens = append(tokens, Token{
+			kind:   kind,
+			value:  value,
+			line:   currentLine,
+			column: currentColumn,
+		})
 	}
 
 ParseLoop:
@@ -240,190 +411,6 @@ ParseLoop:
 	return tokens
 }
 
-func generate(tokens []token) string {
-	var output string
-
-	for i := 0; i < len(tokens); i++ {
-		currentToken := tokens[i]
-
-		nextToken := func(n int) token {
-			// gets the nth token after the current token
-			// skips over spaces and newlines
-			for i+n < len(tokens) {
-				if tokens[i+n].kind == SPACE || tokens[i+n].kind == NEWLINE {
-					n++
-				} else {
-					return tokens[i+n]
-				}
-			}
-			return token{}
-		}
-
-		usedIdentifiers := map[string]bool{}
-
-		switch currentToken.kind {
-		case NEWLINE:
-			output += "\n"
-		case INDENT:
-			output += "\t"
-		case NUMBER:
-			output += currentToken.value
-		case STRING:
-			output += fmt.Sprintf("\"%s\"", currentToken.value)
-		case IDENTIFIER:
-			nextKind := nextToken(1).kind
-			switch nextKind {
-			case EQUALS:
-				// variable assignment
-				if !usedIdentifiers[currentToken.value] {
-					output += "local "
-				}
-				output += currentToken.value
-				usedIdentifiers[currentToken.value] = true
-			case PLUSPLUS:
-				output += currentToken.value + " = " + currentToken.value + " + 1"
-				i++
-			case MINUSMINUS:
-				output += currentToken.value + " = " + currentToken.value + " - 1"
-				i++
-			default:
-				output += currentToken.value + " "
-			}
-		case EQUALS:
-			output += " = "
-		case COMMENT:
-			output += " --" + currentToken.value
-		case TEXTOPERATOR:
-			switch currentToken.value {
-			case "is":
-				output += "== "
-			default:
-				output += currentToken.value
-			}
-		case KEYWORD:
-			parseCond := func() {
-				i++ // skip the keyword
-				var cond string
-				for i < len(tokens) && tokens[i].kind != NEWLINE {
-
-					switch tokens[i].kind {
-					case TEXTOPERATOR:
-						switch tokens[i].value {
-						case "is":
-							cond += "=="
-						default:
-							cond += tokens[i].value
-						}
-					default:
-						cond += tokens[i].value
-					}
-					i++
-				}
-				fmt.Println(c.InRed("cond"), cond)
-				output += cond
-			}
-			hasBlock := false
-			endAfter := false
-			switch currentToken.value {
-			case "loop":
-				output += "while true do"
-				i++
-				hasBlock = true
-				endAfter = true
-			case "if":
-				output += "if"
-				hasBlock = true
-				parseCond()
-				output += " then"
-			case "elseif":
-				output += "elseif"
-				hasBlock = true
-				parseCond()
-				output += " then"
-			case "else":
-				output += "else"
-				i++ // skip the keyword
-				hasBlock = true
-				endAfter = true
-			case "for":
-				output += "for"
-				hasBlock = true
-				endAfter = true
-				parseCond()
-				output += " do"
-			default:
-				output += currentToken.value
-			}
-			output += " "
-
-			if hasBlock {
-				var block []token
-
-				// if next token isn't a newline then error
-				if tokens[i].kind != NEWLINE {
-					fmt.Println(c.InRed("expected newline after keyword"), c.InYellow(tokens[i-1].kind), c.InYellow(tokens[i-1].value))
-					fmt.Println(c.InRed("got"), c.InYellow(tokens[i].kind), c.InYellow(tokens[i].value))
-					os.Exit(1)
-				}
-
-				i++
-
-				// if next token isn't an indent then error
-				if tokens[i].kind != INDENT {
-					fmt.Println(c.InRed("expected indent after newline"))
-					fmt.Println(c.InRed("got"), c.InYellow(tokens[i].kind), c.InYellow(tokens[i].value))
-					os.Exit(1)
-				}
-
-				// get the indent level of the next line
-				indentLevel := 0
-				for i < len(tokens) && tokens[i].kind == INDENT {
-					indentLevel++
-					i++
-				}
-				i--
-				output += "\n"
-
-				currentIndent := 0
-
-				// keep getting tokens until we hit an indent level less than the current one
-				for i < len(tokens) {
-					if tokens[i].kind == INDENT {
-						currentIndent++
-					} else if tokens[i].kind == NEWLINE {
-						currentIndent = 0
-					} else if currentIndent < indentLevel {
-						break
-					}
-
-					if tokens[i].kind != INDENT || currentIndent > indentLevel {
-						block = append(block, tokens[i])
-					}
-					i++
-				}
-				i--
-
-				// remove trailing newlines
-				for block[len(block)-1].kind == NEWLINE {
-					block = block[:len(block)-1]
-				}
-
-				parsedBlock := generate(block)
-
-				// place an indent before every line
-				parsedBlock = strings.Replace("\t"+parsedBlock, "\n", "\n\t", -1)
-
-				output += parsedBlock + "\n"
-				if endAfter {
-					output += "end\n\n"
-				}
-			}
-		}
-	}
-
-	return output
-}
-
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println(c.InRed("No target file specified!"))
@@ -473,7 +460,9 @@ func main() {
 		fmt.Printf("%-15s │ %-22s │ %s\n", toPrint...)
 	}
 
-	out := generate(tokens)
+	parse(tokens)
 
-	fmt.Println(out)
+	// out := generate(tokens)
+
+	// fmt.Println(out)
 }
