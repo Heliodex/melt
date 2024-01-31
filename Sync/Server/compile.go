@@ -12,7 +12,10 @@ func CompileLuau(sourcePath string) (string, error) {
 	}
 
 	cmd := exec.Command(path, "process", sourcePath, "./temp.lua")
-	cmd.Run()
+	err = cmd.Run()
+	if err != nil {
+		return "", err
+	}
 
 	// Return the compiled file
 	file, _ := os.ReadFile("./temp.lua")

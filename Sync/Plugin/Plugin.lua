@@ -191,10 +191,10 @@ end
 local function makeScript(s) -- because no continue
 	local path = s.path -- { "ServerScriptService", "script" }
 	local content = s.content
-	local type = s.type
+	local filetype = s.type
 
 	local obj = game
-	local ok2 = pcall(function()
+	local ok, err = pcall(function()
 		for i = 1, #path - 1 do
 			obj = obj:FindFirstChild(path[i])
 			if not obj then
@@ -205,12 +205,13 @@ local function makeScript(s) -- because no continue
 			end
 		end
 	end)
-	if not ok2 then
+	if not ok then
 		notify(
 			"Failed to sync "
 				.. table.concat(path, ".")
 				.. "! Is the path correct?"
 		)
+		print("Failed to sync:", err)
 		return
 	end
 
@@ -218,7 +219,18 @@ local function makeScript(s) -- because no continue
 	local existingObj = obj:FindFirstChild(name)
 	if existingObj then
 		if existingObj:IsA "Script" then
-			existingObj.Source = content
+			local ok2, err2 = pcall(function()
+				existingObj.Source = content
+			end)
+			if not ok2 then
+				notify(
+					"Failed to sync "
+						.. table.concat(path, ".")
+						.. " to an existing file!"
+				)
+				print("Failed to sync to existing:", err2)
+				return
+			end
 		else
 			notify(
 				"Object already exists at path "
@@ -230,17 +242,37 @@ local function makeScript(s) -- because no continue
 	else
 		local createScript
 
-		if type == "server" then
+		if filetype == "server" then
 			createScript = Instance.new "Script"
-		elseif type == "client" then
+		elseif filetype == "client" then
 			createScript = Instance.new "LocalScript"
 		else
 			return
 		end
 
-		createScript.Name = name
-		createScript.Source = content
-		createScript.Parent = obj
+		print("Name", name)
+		print("Content", content, type(content))
+
+		if type(content) == "table" then
+			for i, v in pairs(content) do
+				print(i, v)
+			end
+		end
+
+		local ok2, err2 = pcall(function()
+			createScript.Name = name
+			createScript.Source = content
+			createScript.Parent = obj
+		end)
+		if not ok2 then
+			notify(
+				"Failed to write "
+					.. table.concat(path, ".")
+					.. "! Is the content valid?"
+			)
+			print("Failed to write:", err2)
+			return
+		end
 	end
 end
 

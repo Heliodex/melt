@@ -93,6 +93,7 @@ func main() {
 				// scripttype = "module"
 				fmt.Println(c.InRed("Unknown script type: ") + c.InUnderline(c.InPurple(formatPath)) + c.InRed("!"))
 				fmt.Println(c.InYellow("If you were trying to sync a ModuleScript, these are not supported by Mercury Sync. Please transpose them manually."))
+				return nil
 			}
 			formatPath = strings.ReplaceAll(formatPath, string(os.PathSeparator), "$dot$")
 
@@ -115,6 +116,12 @@ func main() {
 			case "luau":
 				fmt.Println(c.InBlue("Compiling  ") + c.InUnderline(c.InPurple(dottedPath)) + c.InBlue("..."))
 				content, err = CompileLuau(path)
+
+				if content == "" {
+					fmt.Println(c.InYellow("After compilation, file ") + c.InUnderline(c.InPurple(dottedPath)) + c.InYellow(" was empty!"))
+					content = "-- Mercury Sync: Empty file"
+				}
+
 				if err != nil {
 					fmt.Println(c.InRed("Error while compiling Luau file:"), err)
 					if strings.Contains(err.Error(), "file does not exist") ||
@@ -131,6 +138,11 @@ func main() {
 					return nil
 				}
 				content = string(file)
+
+				if content == "" {
+					fmt.Println(c.InYellow("File ") + c.InUnderline(c.InPurple(dottedPath)) + c.InYellow(" is empty!"))
+					content = "-- Mercury Sync: Empty file"
+				}
 			}
 
 			fmt.Println(c.InGreen("Sending    ") + c.InUnderline(c.InPurple(dottedPath)) + c.InGreen("..."))
@@ -150,7 +162,7 @@ func main() {
 			return nil
 		})
 
-		os.Remove("./temp.lua")
+		// os.Remove("./temp.lua")
 
 		cx.JSON(200, Response)
 	})
