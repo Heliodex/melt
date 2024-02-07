@@ -1,6 +1,6 @@
 module MercurySync
 
-go 1.21.3
+go 1.22.0
 
 require (
 	github.com/TwiN/go-color v1.4.1
