@@ -39,10 +39,6 @@ type BinaryExpr struct {
 	right      Expr
 }
 
-func (b BinaryExpr) Kind() string {
-	return "BinaryExpr"
-}
-
 type UnaryExpr struct {
 	startToken Token
 	expr       Expr
@@ -69,6 +65,15 @@ type BlockExpr struct {
 	startNode   Node
 	expressions []Expr
 }
+
+func (e Identifier) Kind() string     { return "Identifier" }
+func (e AssignmentExpr) Kind() string { return "AssignmentExpr" }
+func (e BinaryExpr) Kind() string     { return "BinaryExpr" }
+func (e UnaryExpr) Kind() string      { return "UnaryExpr" }
+func (e IfExpr) Kind() string         { return "IfExpr" }
+func (e ElseIfExpr) Kind() string     { return "ElseIfExpr" }
+func (e ElseExpr) Kind() string       { return "ElseExpr" }
+func (e BlockExpr) Kind() string      { return "BlockExpr" }
 
 const (
 	EOF     = "EOF"
@@ -118,6 +123,18 @@ var textOperators = map[string]bool{
 	"and": true,
 	"or":  true,
 	"not": true,
+}
+
+func generate(program []Expr) string {
+	var output string
+
+	for i := 0; i < len(program); i++ {
+		expr := program[i]
+
+		fmt.Println(expr)
+	}
+
+	return output
 }
 
 func parse(tokens []Token) []Expr {
@@ -186,9 +203,6 @@ func parse(tokens []Token) []Expr {
 				condTokens := getCondition()
 				blockTokens := getBlock()
 
-				fmt.Println("cond tokens: ", condTokens)
-				fmt.Println("block tokens:", blockTokens)
-
 				addExpr(IfExpr{
 					startToken: token,
 					condition:  parse(condTokens),
@@ -200,9 +214,6 @@ func parse(tokens []Token) []Expr {
 			case "elseif":
 				condTokens := getCondition()
 				blockTokens := getBlock()
-
-				fmt.Println("cond tokens: ", condTokens)
-				fmt.Println("block tokens:", blockTokens)
 
 				addExpr(ElseIfExpr{
 					startToken: token,
@@ -217,8 +228,6 @@ func parse(tokens []Token) []Expr {
 				i++
 
 				blockTokens := getBlock()
-
-				fmt.Println("block tokens:", blockTokens)
 
 				addExpr(ElseExpr{
 					startToken: token,
@@ -460,9 +469,9 @@ func main() {
 		fmt.Printf("%-15s │ %-22s │ %s\n", toPrint...)
 	}
 
-	parse(tokens)
+	program := parse(tokens)
 
-	// out := generate(tokens)
+	out := generate(program)
 
-	// fmt.Println(out)
+	fmt.Println(out)
 }
