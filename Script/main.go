@@ -22,58 +22,53 @@ type Expr interface {
 	Node
 }
 
-type Identifier struct {
+type ExprProps struct {
 	startToken Token
-	name       string
 }
 
-type AssignmentExpr struct {
-	startToken Token
-	left       Expr
-	right      Expr
-}
+// type Identifier struct {
+// 	*ExprProps
+// 	name string
+// }
 
-type BinaryExpr struct {
-	startToken Token
-	left       Expr
-	right      Expr
-}
+// type AssignmentExpr struct {
+// 	*ExprProps
+// 	left  Expr
+// 	right Expr
+// }
 
-type UnaryExpr struct {
-	startToken Token
-	expr       Expr
-}
+// type BinaryExpr struct {
+// 	*ExprProps
+// 	left  Expr
+// 	right Expr
+// }
+
+// type UnaryExpr struct {
+// 	*ExprProps
+// 	expr Expr
+// }
 
 type IfExpr struct {
-	startToken Token
-	condition  Expr
-	block      BlockExpr
+	*ExprProps
+	condition Expr
+	block     BlockExpr
 }
 
 type ElseIfExpr struct {
-	startToken Token
-	condition  Expr
-	block      BlockExpr
+	*ExprProps
+	condition Expr
+	block     BlockExpr
 }
 
 type ElseExpr struct {
-	startToken Token
-	block      BlockExpr
+	*ExprProps
+	block BlockExpr
 }
 
 type BlockExpr struct {
-	startNode   Node
+	*ExprProps
 	expressions []Expr
 }
-
-func (e Identifier) Kind() string     { return "Identifier" }
-func (e AssignmentExpr) Kind() string { return "AssignmentExpr" }
-func (e BinaryExpr) Kind() string     { return "BinaryExpr" }
-func (e UnaryExpr) Kind() string      { return "UnaryExpr" }
-func (e IfExpr) Kind() string         { return "IfExpr" }
-func (e ElseIfExpr) Kind() string     { return "ElseIfExpr" }
-func (e ElseExpr) Kind() string       { return "ElseExpr" }
-func (e BlockExpr) Kind() string      { return "BlockExpr" }
 
 const (
 	EOF     = "EOF"
@@ -129,7 +124,7 @@ func generate(program []Expr) string {
 	var output string
 
 	for i := 0; i < len(program); i++ {
-		expr := program[i]
+		var expr = program[i]
 
 		fmt.Println(expr)
 	}
@@ -192,6 +187,11 @@ func parse(tokens []Token) []Expr {
 			return condTokens
 		}
 
+		props :=
+			&ExprProps{
+				startToken: token,
+			}
+
 		switch token.kind {
 		case INDENT:
 			currentIndent++
@@ -204,22 +204,22 @@ func parse(tokens []Token) []Expr {
 				blockTokens := getBlock()
 
 				addExpr(IfExpr{
-					startToken: token,
-					condition:  parse(condTokens),
+					ExprProps: props,
+					condition: parse(condTokens),
 					block: BlockExpr{
-						startNode:   token,
+						ExprProps:   props,
 						expressions: parse(blockTokens),
 					},
 				})
+
 			case "elseif":
 				condTokens := getCondition()
 				blockTokens := getBlock()
 
 				addExpr(ElseIfExpr{
-					startToken: token,
-					condition:  parse(condTokens),
-					block: BlockExpr{
-						startNode:   token,
+					ExprProps: props,
+					condition: parse(condTokens),
+					block: BlockExpr{ExprProps: props,
 						expressions: parse(blockTokens),
 					},
 				})
@@ -230,9 +230,9 @@ func parse(tokens []Token) []Expr {
 				blockTokens := getBlock()
 
 				addExpr(ElseExpr{
-					startToken: token,
+					ExprProps: props,
 					block: BlockExpr{
-						startNode:   token,
+						ExprProps:   props,
 						expressions: parse(blockTokens),
 					},
 				})
@@ -270,7 +270,6 @@ func lex(source string) []Token {
 		})
 	}
 
-ParseLoop:
 	for i := 0; i < len(source); i++ {
 		char := source[i]
 		column++
@@ -323,6 +322,8 @@ ParseLoop:
 				os.Exit(1)
 			}
 
+			fmt.Println("got a string literal", stringLiteral, startLine, startColumn)
+
 			addToken(STRING, stringLiteral, startLine, startColumn)
 
 		case '+':
@@ -362,7 +363,7 @@ ParseLoop:
 				startLine := line
 				startColumn := column
 
-				var number string
+				var number string // lele
 
 				// keep going until we hit a non-number
 				for i < len(source) && source[i] >= '0' && source[i] <= '9' {
@@ -376,9 +377,10 @@ ParseLoop:
 			} else if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' {
 				startLine := line
 				startColumn := column
-				// keep going until we hit a non-letter
-				var identifierOrKeyword string
 
+				var identifierOrKeyword string
+				
+				// keep going until we hit a non-letter
 				for i < len(source) &&
 					(source[i] >= 'a' && source[i] <= 'z' ||
 						source[i] >= 'A' && source[i] <= 'Z' ||
@@ -400,13 +402,13 @@ ParseLoop:
 				// check if it's a text operator
 				if textOperators[identifierOrKeyword] {
 					addToken(TEXTOPERATOR, identifierOrKeyword, startLine, startColumn)
-					continue ParseLoop
+					continue
 				}
 
 				// check if it's a keyword
 				if keywords[identifierOrKeyword] {
 					addToken(KEYWORD, identifierOrKeyword, startLine, startColumn)
-					continue ParseLoop
+					continue
 				}
 
 				addToken(IDENTIFIER, identifierOrKeyword, startLine, startColumn)
