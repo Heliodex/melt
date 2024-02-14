@@ -4,7 +4,6 @@ local process = require "@lune/process"
 local exit = process.exit
 local colour = require "colour"
 
-local EOF = "EOF"
 local INDENT = "INDENT"
 local SPACE = "SPACE"
 local NEWLINE = "NEWLINE"
@@ -61,17 +60,11 @@ type Token = {
 -- 	return {}
 -- end
 
-local function s(str: string)
-	return function(n: number)
-		return string.sub(str, n, n)
-	end
-end
-
-local function lex(source: string): { Token }
+local function lex(source: { string }): { Token }
 	local tokens: { Token } = {}
 
 	local function last(n: number): Token
-		return tokens[#tokens - n]
+		return tokens[#tokens - (n - 1)]
 	end
 	local line, column = 1, 0
 
@@ -89,13 +82,17 @@ local function lex(source: string): { Token }
 		})
 	end
 
-	for i = 1, #source do
-		local char = s(source)(i)
+	local len = #source + 1
+
+	local i = 0
+	while i < len - 1 do
+		i += 1
+		local char = source[i]
 		column += 1
 
 		if char == "=" then
 			addToken(EQUALS, "=")
-		elseif char == "\n" then
+		elseif char == "\n" then -- newline dont work for some reason
 			addToken(NEWLINE, "\n")
 			line += 1
 			column = 0
@@ -114,8 +111,8 @@ local function lex(source: string): { Token }
 			local startColumn = column
 			i += 1 -- skip the semicolon
 			local comment = ""
-			while i < #source and s(source)(i) ~= "\n" do
-				comment ..= s(source)(i)
+			while i < len and source[i] ~= "\n" do
+				comment ..= source[i]
 				column += 1
 				i += 1
 			end
@@ -129,28 +126,25 @@ local function lex(source: string): { Token }
 
 			column += 1
 			i += 1 -- skip the first quote
-
-			while i < #source and s(source)(i) ~= '"' do
-				stringLiteral ..= s(source)(i)
+			while i < len and source[i] ~= '"' do
+				stringLiteral ..= source[i]
 				column += 1
 				i += 1
 			end
 
-			if i == #source then
-				print(colour.red "unclosed string literal")
+			if i == len then
+				print(colour.red "unclosed string literal", stringLiteral)
 				exit(1)
-			end 
-
-			print("got a string literal", stringLiteral, startLine, startColumn)
+			end
 
 			addToken(STRING, stringLiteral, startLine, startColumn)
 		elseif char == "+" then
 			-- check if it's a ++ or a += or just a +
-			if i + 1 < #source and s(source)(i + 1) == "+" then
+			if i + 1 < len and source[i + 1] == "+" then
 				addToken(PLUSPLUS, "++")
 				i += 1
 				column += 1
-			elseif i + 1 < #source and s(source)(i + 1) == "=" then
+			elseif i + 1 < len and source[i + 1] == "=" then
 				addToken(PLUSEQUALS, "+=")
 				i += 1
 				column += 1
@@ -159,11 +153,11 @@ local function lex(source: string): { Token }
 			end
 		elseif char == "-" then
 			-- check if it's a -- or a -= or just a -
-			if i + 1 < #source and s(source)(i + 1) == "-" then
+			if i + 1 < len and source[i + 1] == "-" then
 				addToken(MINUSMINUS, "--")
 				i += 1
 				column += 1
-			elseif i + 1 < #source and s(source)(i + 1) == "=" then
+			elseif i + 1 < len and source[i + 1] == "=" then
 				addToken(MINUSEQUALS, "-=")
 				i += 1
 				column += 1
@@ -183,12 +177,8 @@ local function lex(source: string): { Token }
 				local number = ""
 
 				-- keep going until we hit a non-number
-				while
-					i < #source
-					and s(source)(i) >= "0"
-					and s(source)(i) <= "9"
-				do
-					number ..= s(source)(i)
+				while i < len and source[i] >= "0" and source[i] <= "9" do
+					number ..= source[i]
 					column += 1
 					i += 1
 				end
@@ -204,19 +194,19 @@ local function lex(source: string): { Token }
 
 				-- keep going until we hit a non-letter
 				while
-					i < #source
+					i < len
 					and (
-						s(source)(i) >= "a" and s(source)(i) <= "z"
-						or s(source)(i) >= "A" and s(source)(i) <= "Z"
-						or s(source)(i) >= "0" and s(source)(i) <= "9"
+						source[i] >= "a" and source[i] <= "z"
+						or source[i] >= "A" and source[i] <= "Z"
+						or source[i] >= "0" and source[i] <= "9"
 					)
 				do
-					identifierOrKeyword ..= s(source)(i)
+					identifierOrKeyword ..= source[i]
 					column += 1
 					i += 1
 				end
 
-				if i == #source then
+				if i == len then
 					-- you can't end a program with an identifier
 					print(colour.red "cant end program with identifier")
 					exit(1)
@@ -254,7 +244,10 @@ local function lex(source: string): { Token }
 					startColumn
 				)
 			else
-				print(colour.red "that isnt a valid character", colour.yellow(char))
+				print(
+					colour.red "that isnt a valid character",
+					colour.yellow(char)
+				)
 				exit(1)
 			end
 		end
@@ -295,9 +288,32 @@ local function main()
 	-- remove trailing newlines
 	source = string.gsub(source, "\n+$", "")
 
-	local tokens = lex(source)
+	local split = string.split(source, "")
 
-	print(tokens)
+	local tokens = lex(split)
+
+	for _, token in tokens do
+		if token.kind == SPACE then
+			continue
+		end
+		if token.kind == NEWLINE then
+			print "────────────────┼───────────────┼─────────────────────────────"
+			continue
+		end
+
+		-- print in a nice format
+		local function pad(str: string, len: number): string
+			return str .. string.rep(" ", len - #str)
+		end
+
+		print(
+			pad(`{target}:{token.line}:{token.column}`, 15),
+			"│",
+			pad(colour.yellow(token.kind), 22),
+			"│",
+			colour.purple(token.value)
+		)
+	end
 
 	-- local program = parse(tokens)
 	-- local out = generate(program)

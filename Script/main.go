@@ -71,7 +71,6 @@ type BlockExpr struct {
 }
 
 const (
-	EOF     = "EOF"
 	INDENT  = "INDENT"
 	SPACE   = "SPACE"
 	NEWLINE = "NEWLINE"
@@ -273,6 +272,7 @@ func lex(source string) []Token {
 	for i := 0; i < len(source); i++ {
 		char := source[i]
 		column++
+
 		switch char {
 		case '=':
 			addToken(EQUALS, "=")
@@ -321,8 +321,6 @@ func lex(source string) []Token {
 				fmt.Println(c.InRed("unclosed string literal"))
 				os.Exit(1)
 			}
-
-			fmt.Println("got a string literal", stringLiteral, startLine, startColumn)
 
 			addToken(STRING, stringLiteral, startLine, startColumn)
 
@@ -379,7 +377,7 @@ func lex(source string) []Token {
 				startColumn := column
 
 				var identifierOrKeyword string
-				
+
 				// keep going until we hit a non-letter
 				for i < len(source) &&
 					(source[i] >= 'a' && source[i] <= 'z' ||
@@ -454,10 +452,10 @@ func main() {
 	tokens := lex(sourceString)
 
 	for _, token := range tokens {
-		if token.kind == "SPACE" {
+		if token.kind == SPACE {
 			continue
 		}
-		if token.kind == "NEWLINE" {
+		if token.kind == NEWLINE {
 			fmt.Println("────────────────┼───────────────┼─────────────────────────────")
 			continue
 		}
