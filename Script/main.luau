@@ -45,6 +45,26 @@ local textOperators = {
 	["not"] = true,
 }
 
+local binaryOperators = {
+	["is"] = true,
+	["and"] = true,
+	["or"] = true,
+	["not"] = true,
+	["="] = true,
+	["+"] = true,
+	["+="] = true,
+	["-"] = true,
+	["-="] = true,
+	["*"] = true,
+	["/"] = true,
+	["%"] = true,
+}
+
+local postfixOperators = {
+	["++"] = true,
+	["--"] = true,
+}
+
 type Token = {
 	kind: string,
 	value: string,
@@ -52,13 +72,275 @@ type Token = {
 	column: number,
 }
 
--- local function generate(program): string
--- 	return ""
--- end
+type Expr = {
+	startToken: Token,
+	kind: string,
+}
 
--- local function parse(tokens: { Token })
--- 	return {}
--- end
+type BlockExpr = Expr & {
+	expressions: { Expr },
+}
+
+local function BlockExpr(startToken: Token, expressions: { Expr }): BlockExpr
+	return {
+		startToken = startToken,
+		kind = "block",
+		expressions = expressions,
+	}
+end
+
+type IfExpr = Expr & {
+	condition: Expr,
+	block: BlockExpr,
+}
+
+local function IfExpr(
+	startToken: Token,
+	condition: Expr,
+	block: BlockExpr
+): IfExpr
+	return {
+		startToken = startToken,
+		kind = "if",
+		condition = condition,
+		block = block,
+	}
+end
+
+type ElseIfExpr = Expr & {
+	condition: Expr,
+	block: BlockExpr,
+}
+
+local function ElseIfExpr(
+	startToken: Token,
+	condition: Expr,
+	block: BlockExpr
+): ElseIfExpr
+	return {
+		startToken = startToken,
+		kind = "elseif",
+		condition = condition,
+		block = block,
+	}
+end
+
+type ElseExpr = Expr & {
+	block: Expr,
+}
+
+local function ElseExpr(startToken: Token, block: BlockExpr): ElseExpr
+	return {
+		startToken = startToken,
+		kind = "else",
+		block = block,
+	}
+end
+
+type BinOpExpr = Expr & {
+	left: Expr,
+	right: Expr,
+	operator: Token,
+}
+
+local function BinOpExpr(
+	startToken: Token,
+	left: Expr,
+	right: Expr,
+	operator: Token
+): BinOpExpr
+	return {
+		startToken = startToken,
+		kind = "binop",
+		left = left,
+		right = right,
+		operator = operator,
+	}
+end
+
+type PostfixOpExpr = Expr & {
+	expr: Expr,
+	operator: Token,
+}
+
+local function PostfixOpExpr(startToken: Token, expr: Expr, operator: Token)
+	return {
+		startToken = startToken,
+		kind = "postfix",
+		expr = expr,
+		operator = operator,
+	}
+end
+
+type FunctionCallExpr = Expr & {
+	name: Token,
+	arg: Expr,
+}
+
+local function FunctionCallExpr(
+	startToken: Token,
+	name: Token,
+	arg: Expr
+): FunctionCallExpr
+	return {
+		startToken = startToken,
+		kind = "functioncall",
+		name = name,
+		arg = arg,
+	}
+end
+
+type IdentifierExpr = Expr
+
+local function IdentifierExpr(startToken: Token): IdentifierExpr
+	return {
+		startToken = startToken,
+		kind = "identifier",
+	}
+end
+
+local function parse(tokens: { Token }): { Expr }
+	local program: { Expr } = {}
+
+	local function addExpr(expr: Expr)
+		table.insert(program, expr)
+	end
+
+	local i = 0
+	local len = #tokens
+	while i < len do
+		i += 1
+		local token = tokens[i]
+		local currentIndent = 0
+
+		local function getBlock(): { Token }
+			-- get tokens until the end of the block (which is the same indent level as the if statement)
+			local blockTokens: { Token } = {}
+			local blockIndent = 0
+
+			-- skip newline at start
+			i += 1
+
+			while i < len do
+				if tokens[i].kind == NEWLINE then
+					blockIndent = 0
+					-- chock next few tokens to see if they're indented
+
+					local j = i + 1
+					while j < len and tokens[j].kind == INDENT do
+						blockIndent += 1
+						j += 1
+					end
+					if blockIndent <= currentIndent then
+						break
+					end
+				end
+				table.insert(blockTokens, tokens[i])
+				i += 1
+			end
+
+			return blockTokens
+		end
+
+		local function getCond(): { Token }
+			local condTokens: { Token } = {}
+
+			-- skip the keyword
+			i += 1
+
+			-- get all tokens until the end of the line
+			while i < len and tokens[i + 1].kind ~= NEWLINE do
+				i += 1
+				table.insert(condTokens, tokens[i])
+			end
+
+			-- skip the newline
+			i += 1
+
+			return condTokens
+		end
+
+		local function nextNonSpace(): Token
+			while i < len and tokens[i].kind == SPACE do
+				i += 1
+			end
+			return tokens[i]
+		end
+
+		local function parseCond(condTokens: { Token }): Expr
+			local cond = parse(condTokens)
+			if #cond > 1 then
+				error(colour.red "too many exprs in cond")
+			elseif #cond < 1 then
+				error(colour.red "not enough exprs in cond")
+			end
+
+			return cond[1]
+		end
+
+		if token.kind == INDENT then
+			currentIndent += 1
+		elseif token.kind == NEWLINE then
+			currentIndent = 0
+		elseif token.kind == KEYWORD then
+			if token.value == "if" then
+				addExpr(
+					IfExpr(
+						token,
+						parseCond(getCond()),
+						BlockExpr(token, parse(getBlock()))
+					)
+				)
+			elseif token.value == "elseif" then
+				addExpr(
+					ElseIfExpr(
+						token,
+						parseCond(getCond()),
+						BlockExpr(token, parse(getBlock()))
+					)
+				)
+			elseif token.value == "else" then
+				-- skip newline
+				i += 1
+
+				addExpr(ElseExpr(token, BlockExpr(token, parse(getBlock()))))
+			else
+				print(token)
+				error(colour.red "unknown token value " .. token.value)
+			end
+		elseif token.kind == IDENTIFIER then
+			-- identifier is at the start of an expression, it could be:
+			-- 1: a binop (next token is a text operator or operator
+			-- 3: a postfix op (next token is ++ or --)
+			-- 4: a function call
+			-- after one 2am philosophical compiler thinking session, I've concluded that yes, an assignment is indeed a binop
+
+			-- skip the identifier
+			i += 1
+			local nextToken = nextNonSpace()
+
+			if binaryOperators[nextToken.value] then
+				-- binop
+				addExpr(BinOpExpr(
+					token,
+					IdentifierExpr(token),
+					-- get condition tokens as rhs
+					parseCond(getCond()),
+					nextToken
+				))
+			elseif postfixOperators[nextToken.value] then
+				-- postfix
+			else
+				-- function call
+			end
+		else
+			print(token)
+			error(colour.red "unknown token kind " .. token.kind)
+		end
+	end
+
+	return program
+end
 
 local function lex(source: { string }): { Token }
 	local tokens: { Token } = {}
@@ -315,8 +597,10 @@ local function main()
 		)
 	end
 
-	-- local program = parse(tokens)
+	local program = parse(tokens)
 	-- local out = generate(program)
+
+	print(program)
 
 	-- print(out)
 end
