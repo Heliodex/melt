@@ -4,29 +4,26 @@ local process = require "@lune/process"
 local exit = process.exit
 local colour = require "colour"
 
-local INDENT = "INDENT"
-local SPACE = "SPACE"
-local NEWLINE = "NEWLINE"
---  Literals
-local IDENTIFIER = "IDENTIFIER"
-local NUMBER = "NUMBER"
-local COMMENT = "COMMENT"
-local STRING = "STRING"
-local KEYWORD = "KEYWORD"
---  Operators
-local TEXTOPERATOR = "TEXTOPERATOR"
-local EQUALS = "EQUALS"
-local PLUS = "PLUS"
-local PLUSPLUS = "PLUSPLUS"
-local PLUSEQUALS = "PLUSEQUALS"
-local MINUS = "MINUS"
-local MINUSMINUS = "MINUSMINUS"
-local MINUSEQUALS = "MINUSEQUALS"
-local TIMES = "TIMES"
-local DIVIDE = "DIVIDE"
-local MODULO = "MODULO"
---  OPEN_BRACE  = "OPEN_BRACE"
---  CLOSE_BRACE = "CLOSE_BRACE"
+type TokenKind =
+	"INDENT"
+	| "SPACE"
+	| "NEWLINE"
+	| "IDENTIFIER"
+	| "NUMBER"
+	| "COMMENT"
+	| "STRING"
+	| "KEYWORD"
+	| "TEXTOPERATOR"
+	| "EQUALS"
+	| "PLUS"
+	| "PLUSPLUS"
+	| "PLUSEQUALS"
+	| "MINUS"
+	| "MINUSMINUS"
+	| "MINUSEQUALS"
+	| "TIMES"
+	| "DIVIDE"
+	| "MODULO"
 
 local keywords = {
 	["if"] = true,
@@ -66,7 +63,7 @@ local postfixOperators = {
 }
 
 type Token = {
-	kind: string,
+	kind: TokenKind,
 	value: string,
 	line: number,
 	column: number,
@@ -222,12 +219,12 @@ local function parse(tokens: { Token }): { Expr }
 			i += 1
 
 			while i < len do
-				if tokens[i].kind == NEWLINE then
+				if tokens[i].kind == "NEWLINE" then
 					blockIndent = 0
 					-- chock next few tokens to see if they're indented
 
 					local j = i + 1
-					while j < len and tokens[j].kind == INDENT do
+					while j < len and tokens[j].kind == "INDENT" do
 						blockIndent += 1
 						j += 1
 					end
@@ -249,7 +246,7 @@ local function parse(tokens: { Token }): { Expr }
 			i += 1
 
 			-- get all tokens until the end of the line
-			while i < len and tokens[i + 1].kind ~= NEWLINE do
+			while i < len and tokens[i + 1].kind ~= "NEWLINE" do
 				i += 1
 				table.insert(condTokens, tokens[i])
 			end
@@ -261,7 +258,7 @@ local function parse(tokens: { Token }): { Expr }
 		end
 
 		local function nextNonSpace(): Token
-			while i < len and tokens[i].kind == SPACE do
+			while i < len and tokens[i].kind == "SPACE" do
 				i += 1
 			end
 			return tokens[i]
@@ -278,11 +275,11 @@ local function parse(tokens: { Token }): { Expr }
 			return cond[1]
 		end
 
-		if token.kind == INDENT then
+		if token.kind == "INDENT" then
 			currentIndent += 1
-		elseif token.kind == NEWLINE then
+		elseif token.kind == "NEWLINE" then
 			currentIndent = 0
-		elseif token.kind == KEYWORD then
+		elseif token.kind == "KEYWORD" then
 			if token.value == "if" then
 				addExpr(
 					IfExpr(
@@ -308,7 +305,7 @@ local function parse(tokens: { Token }): { Expr }
 				print(token)
 				error(colour.red "unknown token value " .. token.value)
 			end
-		elseif token.kind == IDENTIFIER then
+		elseif token.kind == "IDENTIFIER" then
 			-- identifier is at the start of an expression, it could be:
 			-- 1: a binop (next token is a text operator or operator
 			-- 3: a postfix op (next token is ++ or --)
@@ -330,9 +327,13 @@ local function parse(tokens: { Token }): { Expr }
 				))
 			elseif postfixOperators[nextToken.value] then
 				-- postfix
+				error "unimplemented"
 			else
 				-- function call
+				error "unimplemented"
 			end
+		elseif token.kind == "SPACE" or token.kind == "COMMENT" then
+			-- wtf
 		else
 			print(token)
 			error(colour.red "unknown token kind " .. token.kind)
@@ -351,7 +352,7 @@ local function lex(source: { string }): { Token }
 	local line, column = 1, 0
 
 	local function addToken(
-		kind: string,
+		kind: TokenKind,
 		value: string,
 		newLine: number?,
 		newColumn: number?
@@ -373,20 +374,20 @@ local function lex(source: { string }): { Token }
 		column += 1
 
 		if char == "=" then
-			addToken(EQUALS, "=")
+			addToken("EQUALS", "=")
 		elseif char == "\n" then -- newline dont work for some reason
-			addToken(NEWLINE, "\n")
+			addToken("NEWLINE", "\n")
 			line += 1
 			column = 0
 		elseif char == " " then
-			addToken(SPACE, " ")
+			addToken("SPACE", " ")
 		elseif char == "\t" then
 			-- only if last line is a newline or an indent
-			if last(1).kind == NEWLINE or last(1).kind == INDENT then
-				addToken(INDENT, "\t")
+			if last(1).kind == "NEWLINE" or last(1).kind == "INDENT" then
+				addToken("INDENT", "\t")
 				column += 3
 			else
-				addToken(SPACE, "\t")
+				addToken("SPACE", "\t")
 			end
 		elseif char == ";" then
 			-- parse till end of line
@@ -400,7 +401,7 @@ local function lex(source: { string }): { Token }
 			end
 			column -= 1
 			i -= 1
-			addToken(COMMENT, comment, line, startColumn)
+			addToken("COMMENT", comment, line, startColumn)
 		elseif char == '"' then
 			local startLine, startColumn = line, column
 
@@ -419,39 +420,39 @@ local function lex(source: { string }): { Token }
 				exit(1)
 			end
 
-			addToken(STRING, stringLiteral, startLine, startColumn)
+			addToken("STRING", stringLiteral, startLine, startColumn)
 		elseif char == "+" then
 			-- check if it's a ++ or a += or just a +
 			if i + 1 < len and source[i + 1] == "+" then
-				addToken(PLUSPLUS, "++")
+				addToken("PLUSPLUS", "++")
 				i += 1
 				column += 1
 			elseif i + 1 < len and source[i + 1] == "=" then
-				addToken(PLUSEQUALS, "+=")
+				addToken("PLUSEQUALS", "+=")
 				i += 1
 				column += 1
 			else
-				addToken(PLUS, "+")
+				addToken("PLUS", "+")
 			end
 		elseif char == "-" then
 			-- check if it's a -- or a -= or just a -
 			if i + 1 < len and source[i + 1] == "-" then
-				addToken(MINUSMINUS, "--")
+				addToken("MINUSMINUS", "--")
 				i += 1
 				column += 1
 			elseif i + 1 < len and source[i + 1] == "=" then
-				addToken(MINUSEQUALS, "-=")
+				addToken("MINUSEQUALS", "-=")
 				i += 1
 				column += 1
 			else
-				addToken(MINUS, "-")
+				addToken("MINUS", "-")
 			end
 		elseif char == "*" then
-			addToken(TIMES, "*")
+			addToken("TIMES", "*")
 		elseif char == "/" then
-			addToken(DIVIDE, "/")
+			addToken("DIVIDE", "/")
 		elseif char == "%" then
-			addToken(MODULO, "%")
+			addToken("MODULO", "%")
 		else
 			if char >= "0" and char <= "9" then
 				local startLine, startColumn = line, column
@@ -466,7 +467,7 @@ local function lex(source: { string }): { Token }
 				end
 				column -= 1
 				i -= 1
-				addToken(NUMBER, number, startLine, startColumn)
+				addToken("NUMBER", number, startLine, startColumn)
 			elseif
 				char >= "a" and char <= "z" or char >= "A" and char <= "Z"
 			then
@@ -500,7 +501,7 @@ local function lex(source: { string }): { Token }
 				-- check if it's a text operator
 				if textOperators[identifierOrKeyword] then
 					addToken(
-						TEXTOPERATOR,
+						"TEXTOPERATOR",
 						identifierOrKeyword,
 						startLine,
 						startColumn
@@ -511,7 +512,7 @@ local function lex(source: { string }): { Token }
 				-- check if it's a keyword
 				if keywords[identifierOrKeyword] then
 					addToken(
-						KEYWORD,
+						"KEYWORD",
 						identifierOrKeyword,
 						startLine,
 						startColumn
@@ -520,7 +521,7 @@ local function lex(source: { string }): { Token }
 				end
 
 				addToken(
-					IDENTIFIER,
+					"IDENTIFIER",
 					identifierOrKeyword,
 					startLine,
 					startColumn
@@ -575,10 +576,10 @@ local function main()
 	local tokens = lex(split)
 
 	for _, token in tokens do
-		if token.kind == SPACE then
+		if token.kind == "SPACE" then
 			continue
 		end
-		if token.kind == NEWLINE then
+		if token.kind == "NEWLINE" then
 			print "────────────────┼───────────────┼─────────────────────────────"
 			continue
 		end
