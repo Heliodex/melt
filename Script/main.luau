@@ -134,6 +134,18 @@ local function ElseExpr(startToken: Token, block: BlockExpr): ElseExpr
 	}
 end
 
+type LoopExpr = Expr & {
+	block: Expr,
+}
+
+local function LoopExpr(startToken: Token, block: BlockExpr): LoopExpr
+	return {
+		startToken = startToken,
+		kind = "loop",
+		block = block,
+	}
+end
+
 type BinOpExpr = Expr & {
 	left: Expr,
 	right: Expr,
@@ -190,11 +202,40 @@ end
 type IdentifierExpr = Expr
 
 local function IdentifierExpr(startToken: Token): IdentifierExpr
+	if startToken.kind ~= "IDENTIFIER" then
+		error(`expected identifier, got {startToken.kind}`)
+	end
 	return {
 		startToken = startToken,
 		kind = "identifier",
 	}
 end
+
+type NumberExpr = Expr
+
+local function NumberExpr(startToken: Token): NumberExpr
+	if startToken.kind ~= "NUMBER" then
+		error(`expected number, got {startToken.kind}`)
+	end
+	return {
+		startToken = startToken,
+		kind = "identifier",
+	}
+end
+
+type StringExpr = Expr
+
+local function StringExpr(startToken: Token): StringExpr
+	if startToken.kind ~= "STRING" then
+		error(`expected number, got {startToken.kind}`)
+	end
+	return {
+		startToken = startToken,
+		kind = "identifier",
+	}
+end
+
+-- yea
 
 local function parse(tokens: { Token }): { Expr }
 	local program: { Expr } = {}
@@ -257,11 +298,12 @@ local function parse(tokens: { Token }): { Expr }
 			return condTokens
 		end
 
-		local function nextNonSpace(): Token
-			while i < len and tokens[i].kind == "SPACE" do
-				i += 1
+		local function nextNonSpace(): (Token, number)
+			local j = i
+			while j < len and tokens[j].kind == "SPACE" do
+				j += 1
 			end
-			return tokens[i]
+			return tokens[j], j
 		end
 
 		local function parseCond(condTokens: { Token }): Expr
@@ -301,6 +343,11 @@ local function parse(tokens: { Token }): { Expr }
 				i += 1
 
 				addExpr(ElseExpr(token, BlockExpr(token, parse(getBlock()))))
+			elseif token.value == "loop" then
+				-- skip newline
+				i += 1
+
+				addExpr(LoopExpr(token, BlockExpr(token, parse(getBlock()))))
 			else
 				print(token)
 				error(colour.red "unknown token value " .. token.value)
@@ -310,14 +357,20 @@ local function parse(tokens: { Token }): { Expr }
 			-- 1: a binop (next token is a text operator or operator
 			-- 3: a postfix op (next token is ++ or --)
 			-- 4: a function call
+			-- 5: standalone
 			-- after one 2am philosophical compiler thinking session, I've concluded that yes, an assignment is indeed a binop
 
 			-- skip the identifier
 			i += 1
-			local nextToken = nextNonSpace()
+			local nextToken, advance = nextNonSpace()
 
-			if binaryOperators[nextToken.value] then
+			if not nextToken then
+				-- standalone
+				i = advance
+				addExpr(IdentifierExpr(token))
+			elseif binaryOperators[nextToken.value] then
 				-- binop
+				i = advance
 				addExpr(BinOpExpr(
 					token,
 					IdentifierExpr(token),
@@ -329,8 +382,66 @@ local function parse(tokens: { Token }): { Expr }
 				-- postfix
 				error "unimplemented"
 			else
-				-- function call
-				error "unimplemented"
+				i -= 1 -- getCond skips the identifier
+				addExpr(FunctionCallExpr(token, token, parseCond(getCond())))
+			end
+		elseif token.kind == "NUMBER" then
+			-- number is at the start of an expression, it could be:
+			-- 1: a binop (next token is a text operator or operator
+			-- 2: standalone
+
+			-- skip the number
+			i += 1
+			local nextToken, advance = nextNonSpace()
+
+			local function standalone()
+				i = advance
+				addExpr(NumberExpr(token))
+			end
+
+			if not nextToken then
+				standalone()
+			elseif binaryOperators[nextToken.value] then
+				-- binop
+				i = advance
+				addExpr(BinOpExpr(
+					token,
+					IdentifierExpr(token),
+					-- get condition tokens as rhs
+					parseCond(getCond()),
+					nextToken
+				))
+			else
+				standalone()
+			end
+		elseif token.kind == "STRING" then
+			-- string is at the start of an expression, it could be:
+			-- 1: a binop (next token is a text operator or operator
+			-- 2: standalone
+
+			-- skip the string
+			i += 1
+			local nextToken, advance = nextNonSpace()
+
+			local function standalone()
+				i = advance
+				addExpr(StringExpr(token))
+			end
+
+			if not nextToken then
+				standalone()
+			elseif binaryOperators[nextToken.value] then
+				-- binop
+				i = advance
+				addExpr(BinOpExpr(
+					token,
+					IdentifierExpr(token),
+					-- get condition tokens as rhs
+					parseCond(getCond()),
+					nextToken
+				))
+			else
+				standalone()
 			end
 		elseif token.kind == "SPACE" or token.kind == "COMMENT" then
 			-- wtf
