@@ -10,7 +10,6 @@ type TokenKind =
 	| "NEWLINE"
 	| "IDENTIFIER"
 	| "NUMBER"
-	| "COMMENT"
 	| "STRING"
 	| "KEYWORD"
 	| "TEXTOPERATOR"
@@ -25,14 +24,22 @@ type TokenKind =
 	| "DIVIDE"
 	| "MODULO"
 
+type ExprKind =
+	"block"
+	| "if"
+	| "elseif"
+	| "else"
+	| "binop"
+	| "postfix"
+	| "functioncall"
+	| "identifier"
+	| "number"
+	| "string"
+
 local keywords = {
 	["if"] = true,
 	["elseif"] = true,
 	["else"] = true,
-	["loop"] = true,
-	["for"] = true,
-	["break"] = true,
-	["continue"] = true,
 }
 
 local textOperators = {
@@ -70,8 +77,8 @@ type Token = {
 }
 
 type Expr = {
+	kind: ExprKind,
 	startToken: Token,
-	kind: string,
 }
 
 type BlockExpr = Expr & {
@@ -81,7 +88,7 @@ type BlockExpr = Expr & {
 local function BlockExpr(startToken: Token, expressions: { Expr }): BlockExpr
 	return {
 		startToken = startToken,
-		kind = "block",
+		kind = "block" :: ExprKind,
 		expressions = expressions,
 	}
 end
@@ -98,7 +105,7 @@ local function IfExpr(
 ): IfExpr
 	return {
 		startToken = startToken,
-		kind = "if",
+		kind = "if" :: ExprKind,
 		condition = condition,
 		block = block,
 	}
@@ -116,7 +123,7 @@ local function ElseIfExpr(
 ): ElseIfExpr
 	return {
 		startToken = startToken,
-		kind = "elseif",
+		kind = "elseif" :: ExprKind,
 		condition = condition,
 		block = block,
 	}
@@ -129,19 +136,7 @@ type ElseExpr = Expr & {
 local function ElseExpr(startToken: Token, block: BlockExpr): ElseExpr
 	return {
 		startToken = startToken,
-		kind = "else",
-		block = block,
-	}
-end
-
-type LoopExpr = Expr & {
-	block: Expr,
-}
-
-local function LoopExpr(startToken: Token, block: BlockExpr): LoopExpr
-	return {
-		startToken = startToken,
-		kind = "loop",
+		kind = "else" :: ExprKind,
 		block = block,
 	}
 end
@@ -160,7 +155,7 @@ local function BinOpExpr(
 ): BinOpExpr
 	return {
 		startToken = startToken,
-		kind = "binop",
+		kind = "binop" :: ExprKind,
 		left = left,
 		right = right,
 		operator = operator,
@@ -172,10 +167,14 @@ type PostfixOpExpr = Expr & {
 	operator: Token,
 }
 
-local function PostfixOpExpr(startToken: Token, expr: Expr, operator: Token)
+local function PostfixOpExpr(
+	startToken: Token,
+	expr: Expr,
+	operator: Token
+): PostfixOpExpr
 	return {
 		startToken = startToken,
-		kind = "postfix",
+		kind = "postfix" :: ExprKind,
 		expr = expr,
 		operator = operator,
 	}
@@ -193,7 +192,7 @@ local function FunctionCallExpr(
 ): FunctionCallExpr
 	return {
 		startToken = startToken,
-		kind = "functioncall",
+		kind = "functioncall" :: ExprKind,
 		name = name,
 		arg = arg,
 	}
@@ -207,7 +206,7 @@ local function IdentifierExpr(startToken: Token): IdentifierExpr
 	end
 	return {
 		startToken = startToken,
-		kind = "identifier",
+		kind = "identifier" :: ExprKind,
 	}
 end
 
@@ -219,7 +218,7 @@ local function NumberExpr(startToken: Token): NumberExpr
 	end
 	return {
 		startToken = startToken,
-		kind = "identifier",
+		kind = "number" :: ExprKind,
 	}
 end
 
@@ -231,11 +230,112 @@ local function StringExpr(startToken: Token): StringExpr
 	end
 	return {
 		startToken = startToken,
-		kind = "identifier",
+		kind = "string" :: ExprKind,
 	}
 end
 
 -- yea
+
+local function generate(program: { Expr }): string
+	local output = ""
+
+	local i = 0
+	local len = #program
+	while i < len do
+		i += 1
+		local expr = program[i]
+
+		local kind = expr.kind
+		if kind == "binop" then
+			local binop = expr :: BinOpExpr
+			local value = binop.operator.value
+
+			if value == "=" then
+				output ..= "local "
+			end
+
+			output ..= generate { binop.left }
+			output ..= if value == "is" then " == " else ` {value} `
+			output ..= generate { binop.right }
+			output ..= "\n"
+		elseif kind == "identifier" then
+			local identifier = expr :: IdentifierExpr
+			output ..= identifier.startToken.value
+		elseif kind == "number" then
+			local number = expr :: NumberExpr
+			output ..= number.startToken.value
+		elseif kind == "string" then
+			local string = expr :: StringExpr
+			output ..= `"{string.startToken.value}"`
+		elseif kind == "functioncall" then
+			local functioncall = expr :: FunctionCallExpr
+			output ..= functioncall.name.value
+			output ..= "("
+			output ..= generate { functioncall.arg }
+			output ..= ");\n"
+		elseif kind == "if" then
+			local ifexpr = expr :: IfExpr
+			output ..= "\n(function() if "
+			output ..= generate { ifexpr.condition }
+			output ..= " then\n"
+			output ..= generate { ifexpr.block }
+
+			if i + 1 < len then
+				local nextExprKind = program[i + 1].kind
+
+				if nextExprKind ~= "elseif" and nextExprKind ~= "else" then
+					output ..= "end end)()"
+				end
+			end
+		elseif kind == "elseif" then
+			local elseifexpr = expr :: ElseIfExpr
+			output ..= "elseif "
+			output ..= generate { elseifexpr.condition }
+			output ..= " then\n"
+			output ..= generate { elseifexpr.block }
+
+			if i + 1 < len then
+				local nextExprKind = program[i + 1].kind
+
+				if nextExprKind ~= "else" then
+					output ..= "end end)()"
+				end
+			end
+		elseif kind == "else" then
+			local elseexpr = expr :: ElseExpr
+			output ..= "else\n"
+			output ..= generate { elseexpr.block }
+			output ..= "end end)()\n"
+		elseif kind == "block" then
+			local block = expr :: BlockExpr
+			local b = 0
+			while b < #block.expressions - 1 do
+				b += 1
+				output ..= "\t" .. generate { block.expressions[b] }
+			end
+			output ..= "return "
+			output ..= "\t" .. generate { block.expressions[b + 1] }
+			output ..= "\n"
+		elseif kind == "postfix" then
+			local postfix = expr :: PostfixOpExpr
+			output ..= generate { postfix.expr }
+
+			local value = postfix.operator.value
+
+			if value == "++" then
+				output ..= " += 1\n"
+			elseif value == "--" then
+				output ..= " -= 1\n"
+			else
+				error(`unknown postfix operator {value}`)
+			end
+		else
+			error(`unknown expr kind {kind}`)
+		end
+	end
+
+	return output
+end
 
 local function parse(tokens: { Token }): { Expr }
 	local program: { Expr } = {}
@@ -259,7 +359,7 @@ local function parse(tokens: { Token }): { Expr }
 			-- skip newline at start
 			i += 1
 
-			while i < len do
+			while i < len + 1 do -- todo figure out if the + 1 breaks something or not its 5:57 am idck
 				if tokens[i].kind == "NEWLINE" then
 					blockIndent = 0
 					-- chock next few tokens to see if they're indented
@@ -342,12 +442,11 @@ local function parse(tokens: { Token }): { Expr }
 				-- skip newline
 				i += 1
 
-				addExpr(ElseExpr(token, BlockExpr(token, parse(getBlock()))))
-			elseif token.value == "loop" then
-				-- skip newline
-				i += 1
+				local block = getBlock()
 
-				addExpr(LoopExpr(token, BlockExpr(token, parse(getBlock()))))
+				print("else block", block)
+
+				addExpr(ElseExpr(token, BlockExpr(token, parse(block))))
 			else
 				print(token)
 				error(colour.red "unknown token value " .. token.value)
@@ -380,7 +479,8 @@ local function parse(tokens: { Token }): { Expr }
 				))
 			elseif postfixOperators[nextToken.value] then
 				-- postfix
-				error "unimplemented"
+				i = advance
+				addExpr(PostfixOpExpr(token, IdentifierExpr(token), nextToken))
 			else
 				i -= 1 -- getCond skips the identifier
 				addExpr(FunctionCallExpr(token, token, parseCond(getCond())))
@@ -399,9 +499,9 @@ local function parse(tokens: { Token }): { Expr }
 				addExpr(NumberExpr(token))
 			end
 
-			if not nextToken then
+			if not nextToken or not binaryOperators[nextToken.value] then
 				standalone()
-			elseif binaryOperators[nextToken.value] then
+			else
 				-- binop
 				i = advance
 				addExpr(BinOpExpr(
@@ -411,8 +511,6 @@ local function parse(tokens: { Token }): { Expr }
 					parseCond(getCond()),
 					nextToken
 				))
-			else
-				standalone()
 			end
 		elseif token.kind == "STRING" then
 			-- string is at the start of an expression, it could be:
@@ -428,9 +526,9 @@ local function parse(tokens: { Token }): { Expr }
 				addExpr(StringExpr(token))
 			end
 
-			if not nextToken then
+			if not nextToken or not binaryOperators[nextToken.value] then
 				standalone()
-			elseif binaryOperators[nextToken.value] then
+			else
 				-- binop
 				i = advance
 				addExpr(BinOpExpr(
@@ -440,12 +538,8 @@ local function parse(tokens: { Token }): { Expr }
 					parseCond(getCond()),
 					nextToken
 				))
-			else
-				standalone()
 			end
-		elseif token.kind == "SPACE" or token.kind == "COMMENT" then
-			-- wtf
-		else
+		elseif token.kind ~= "SPACE" then
 			print(token)
 			error(colour.red "unknown token kind " .. token.kind)
 		end
@@ -502,17 +596,15 @@ local function lex(source: { string }): { Token }
 			end
 		elseif char == ";" then
 			-- parse till end of line
-			local startColumn = column
 			i += 1 -- skip the semicolon
-			local comment = ""
 			while i < len and source[i] ~= "\n" do
-				comment ..= source[i]
 				column += 1
 				i += 1
 			end
 			column -= 1
 			i -= 1
-			addToken("COMMENT", comment, line, startColumn)
+
+			-- I used to do something with it here but nah
 		elseif char == '"' then
 			local startLine, startColumn = line, column
 
@@ -564,7 +656,7 @@ local function lex(source: { string }): { Token }
 			addToken("DIVIDE", "/")
 		elseif char == "%" then
 			addToken("MODULO", "%")
-		else
+		elseif char ~= " " then
 			if char >= "0" and char <= "9" then
 				local startLine, startColumn = line, column
 
@@ -598,12 +690,6 @@ local function lex(source: { string }): { Token }
 					identifierOrKeyword ..= source[i]
 					column += 1
 					i += 1
-				end
-
-				if i == len then
-					-- you can't end a program with an identifier
-					print(colour.red "cant end program with identifier")
-					exit(1)
 				end
 
 				column -= 1
@@ -682,39 +768,11 @@ local function main()
 	-- remove trailing newlines
 	source = string.gsub(source, "\n+$", "")
 
-	local split = string.split(source, "")
-
-	local tokens = lex(split)
-
-	for _, token in tokens do
-		if token.kind == "SPACE" then
-			continue
-		end
-		if token.kind == "NEWLINE" then
-			print "────────────────┼───────────────┼─────────────────────────────"
-			continue
-		end
-
-		-- print in a nice format
-		local function pad(str: string, len: number): string
-			return str .. string.rep(" ", len - #str)
-		end
-
-		print(
-			pad(`{target}:{token.line}:{token.column}`, 15),
-			"│",
-			pad(colour.yellow(token.kind), 22),
-			"│",
-			colour.purple(token.value)
-		)
-	end
-
+	local tokens = lex(string.split(source, ""))
 	local program = parse(tokens)
-	-- local out = generate(program)
+	local out = generate(program)
 
-	print(program)
-
-	-- print(out)
+	print(out)
 end
 
 main()

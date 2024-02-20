@@ -210,7 +210,6 @@ func parse(tokens []Token) []Expr {
 						expressions: parse(blockTokens),
 					},
 				})
-
 			case "elseif":
 				condTokens := getCondition()
 				blockTokens := getBlock()
