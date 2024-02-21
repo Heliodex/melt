@@ -93,42 +93,6 @@ local function BlockExpr(startToken: Token, expressions: { Expr }): BlockExpr
 	}
 end
 
-type IfExpr = Expr & {
-	condition: Expr,
-	block: BlockExpr,
-}
-
-local function IfExpr(
-	startToken: Token,
-	condition: Expr,
-	block: BlockExpr
-): IfExpr
-	return {
-		startToken = startToken,
-		kind = "if" :: ExprKind,
-		condition = condition,
-		block = block,
-	}
-end
-
-type ElseIfExpr = Expr & {
-	condition: Expr,
-	block: BlockExpr,
-}
-
-local function ElseIfExpr(
-	startToken: Token,
-	condition: Expr,
-	block: BlockExpr
-): ElseIfExpr
-	return {
-		startToken = startToken,
-		kind = "elseif" :: ExprKind,
-		condition = condition,
-		block = block,
-	}
-end
-
 type ElseExpr = Expr & {
 	block: Expr,
 }
@@ -138,6 +102,48 @@ local function ElseExpr(startToken: Token, block: BlockExpr): ElseExpr
 		startToken = startToken,
 		kind = "else" :: ExprKind,
 		block = block,
+	}
+end
+
+type ElseIfExpr = Expr & {
+	condition: Expr,
+	block: BlockExpr,
+	next: (ElseIfExpr | ElseExpr)?,
+}
+
+local function ElseIfExpr(
+	startToken: Token,
+	condition: Expr,
+	block: BlockExpr,
+	next: (ElseIfExpr | ElseExpr)?
+): ElseIfExpr
+	return {
+		startToken = startToken,
+		kind = "elseif" :: ExprKind,
+		condition = condition,
+		block = block,
+		next = next,
+	}
+end
+
+type IfExpr = Expr & {
+	condition: Expr,
+	block: BlockExpr,
+	next: (ElseIfExpr | ElseExpr)?,
+}
+
+local function IfExpr(
+	startToken: Token,
+	condition: Expr,
+	block: BlockExpr,
+	next: (ElseIfExpr | ElseExpr)?
+): IfExpr
+	return {
+		startToken = startToken,
+		kind = "if" :: ExprKind,
+		condition = condition,
+		block = block,
+		next = next,
 	}
 end
 
@@ -236,6 +242,19 @@ end
 
 -- yea
 
+local function indent(str: string, level: number)
+	local outputLines = string.split(str, "\n")
+
+	for j in outputLines do
+		-- add indentationLevel
+		for _ = 1, level do
+			outputLines[j] = "    " .. outputLines[j]
+		end
+	end
+
+	return table.concat(outputLines, "\n")
+end
+
 local function generate(program: { Expr }): string
 	local output = ""
 
@@ -245,19 +264,26 @@ local function generate(program: { Expr }): string
 		i += 1
 		local expr = program[i]
 
+		local nextExprKind = i + 1 < len and program[i + 1].kind
+
 		local kind = expr.kind
 		if kind == "binop" then
 			local binop = expr :: BinOpExpr
-			local value = binop.operator.value
+			local operator = if binop.operator.value == "is"
+				then "=="
+				else binop.operator.value
 
-			if value == "=" then
+			if operator == "=" then
 				output ..= "local "
 			end
 
 			output ..= generate { binop.left }
-			output ..= if value == "is" then " == " else ` {value} `
+			output ..= ` {operator} `
 			output ..= generate { binop.right }
-			output ..= "\n"
+
+			if operator == "=" then
+				output ..= "\n"
+			end
 		elseif kind == "identifier" then
 			local identifier = expr :: IdentifierExpr
 			output ..= identifier.startToken.value
@@ -270,52 +296,45 @@ local function generate(program: { Expr }): string
 		elseif kind == "functioncall" then
 			local functioncall = expr :: FunctionCallExpr
 			output ..= functioncall.name.value
-			output ..= "("
+
+			output ..= if functioncall.arg.kind == "string" then " " else "("
 			output ..= generate { functioncall.arg }
-			output ..= ");\n"
+			output ..= if functioncall.arg.kind == "string" then "" else ")"
+
+			if nextExprKind == "if" then
+				output ..= ";"
+			end
+
+			output ..= "\n"
 		elseif kind == "if" then
 			local ifexpr = expr :: IfExpr
-			output ..= "\n(function() if "
-			output ..= generate { ifexpr.condition }
-			output ..= " then\n"
-			output ..= generate { ifexpr.block }
+			output ..= "(function()\n"
 
-			if i + 1 < len then
-				local nextExprKind = program[i + 1].kind
+			local block = ""
+			block ..= "if "
+			block ..= generate { ifexpr.condition }
+			block ..= " then\n"
 
-				if nextExprKind ~= "elseif" and nextExprKind ~= "else" then
-					output ..= "end end)()"
-				end
-			end
-		elseif kind == "elseif" then
-			local elseifexpr = expr :: ElseIfExpr
-			output ..= "elseif "
-			output ..= generate { elseifexpr.condition }
-			output ..= " then\n"
-			output ..= generate { elseifexpr.block }
+			block ..= indent(generate { ifexpr.block }, 1)
+			block ..= "\n"
 
-			if i + 1 < len then
-				local nextExprKind = program[i + 1].kind
+			block ..= "end"
 
-				if nextExprKind ~= "else" then
-					output ..= "end end)()"
-				end
-			end
-		elseif kind == "else" then
-			local elseexpr = expr :: ElseExpr
-			output ..= "else\n"
-			output ..= generate { elseexpr.block }
-			output ..= "end end)()\n"
+			output ..= indent(block, 1)
+
+			output ..= "\n"
+			output ..= "end)()"
+
+			-- ifexpr.next is an elseifexpr or an elseexpr
 		elseif kind == "block" then
 			local block = expr :: BlockExpr
 			local b = 0
 			while b < #block.expressions - 1 do
 				b += 1
-				output ..= "\t" .. generate { block.expressions[b] }
+				output ..= generate { block.expressions[b] }
 			end
 			output ..= "return "
-			output ..= "\t" .. generate { block.expressions[b + 1] }
-			output ..= "\n"
+			output ..= generate { block.expressions[b + 1] }
 		elseif kind == "postfix" then
 			local postfix = expr :: PostfixOpExpr
 			output ..= generate { postfix.expr }
@@ -340,6 +359,10 @@ end
 local function parse(tokens: { Token }): { Expr }
 	local program: { Expr } = {}
 
+	if #tokens == 0 then
+		error(colour.red "no tokens to parse")
+	end
+
 	local function addExpr(expr: Expr)
 		table.insert(program, expr)
 	end
@@ -356,10 +379,11 @@ local function parse(tokens: { Token }): { Expr }
 			local blockTokens: { Token } = {}
 			local blockIndent = 0
 
-			-- skip newline at start
-			i += 1
+			if #tokens == 0 then
+				error(colour.red "tried to get empty block")
+			end
 
-			while i < len + 1 do -- todo figure out if the + 1 breaks something or not its 5:57 am idck
+			while i < len do -- todo figure out if the + 1 breaks something or not its 5:57 am idck
 				if tokens[i].kind == "NEWLINE" then
 					blockIndent = 0
 					-- chock next few tokens to see if they're indented
@@ -370,12 +394,24 @@ local function parse(tokens: { Token }): { Expr }
 						j += 1
 					end
 					if blockIndent <= currentIndent then
+						print "block finished"
 						break
 					end
 				end
+
 				table.insert(blockTokens, tokens[i])
 				i += 1
 			end
+
+			if i >= len then
+				print "welp"
+			end
+
+			if #blockTokens == 0 then
+				error(colour.red "empty block")
+			end
+
+			print(blockTokens)
 
 			return blockTokens
 		end
@@ -383,17 +419,11 @@ local function parse(tokens: { Token }): { Expr }
 		local function getCond(): { Token }
 			local condTokens: { Token } = {}
 
-			-- skip the keyword
-			i += 1
-
 			-- get all tokens until the end of the line
 			while i < len and tokens[i + 1].kind ~= "NEWLINE" do
 				i += 1
 				table.insert(condTokens, tokens[i])
 			end
-
-			-- skip the newline
-			i += 1
 
 			return condTokens
 		end
@@ -407,7 +437,11 @@ local function parse(tokens: { Token }): { Expr }
 		end
 
 		local function parseCond(condTokens: { Token }): Expr
+			print("parsing cond", condTokens)
+			error("bruh")
+
 			local cond = parse(condTokens)
+
 			if #cond > 1 then
 				error(colour.red "too many exprs in cond")
 			elseif #cond < 1 then
@@ -423,33 +457,39 @@ local function parse(tokens: { Token }): { Expr }
 			currentIndent = 0
 		elseif token.kind == "KEYWORD" then
 			if token.value == "if" then
-				addExpr(
-					IfExpr(
-						token,
-						parseCond(getCond()),
-						BlockExpr(token, parse(getBlock()))
-					)
-				)
-			elseif token.value == "elseif" then
-				addExpr(
-					ElseIfExpr(
-						token,
-						parseCond(getCond()),
-						BlockExpr(token, parse(getBlock()))
-					)
-				)
-			elseif token.value == "else" then
-				-- skip newline
-				i += 1
+				print(i)
+				local cond = getCond()
+				print(i)
 
 				local block = getBlock()
 
-				print("else block", block)
+				local expr = IfExpr(
+					token,
+					parseCond(cond),
+					BlockExpr(token, parse(block))
+				)
+				addExpr(expr)
+				-- elseif token.value == "elseif" then
+				-- 	local cond = getCond()
+				-- 	-- skip the newline
+				-- 	i += 1
+				-- 	local block = getBlock()
+				-- 	addExpr(
+				-- 		ElseIfExpr(
+				-- 			token,
+				-- 			parseCond(cond),
+				-- 			BlockExpr(token, parse(block))
+				-- 		)
+				-- 	)
+				-- elseif token.value == "else" then
+				-- 	-- skip newline
+				-- 	i += 1
 
-				addExpr(ElseExpr(token, BlockExpr(token, parse(block))))
-			else
-				print(token)
-				error(colour.red "unknown token value " .. token.value)
+				-- 	local block = getBlock()
+				-- 	addExpr(ElseExpr(token, BlockExpr(token, parse(block))))
+				-- else
+				-- 	print(token)
+				-- 	error(colour.red "unknown token value " .. token.value)
 			end
 		elseif token.kind == "IDENTIFIER" then
 			-- identifier is at the start of an expression, it could be:
@@ -470,11 +510,12 @@ local function parse(tokens: { Token }): { Expr }
 			elseif binaryOperators[nextToken.value] then
 				-- binop
 				i = advance
+				local cond = getCond()
 				addExpr(BinOpExpr(
 					token,
 					IdentifierExpr(token),
 					-- get condition tokens as rhs
-					parseCond(getCond()),
+					parseCond(cond),
 					nextToken
 				))
 			elseif postfixOperators[nextToken.value] then
@@ -483,7 +524,8 @@ local function parse(tokens: { Token }): { Expr }
 				addExpr(PostfixOpExpr(token, IdentifierExpr(token), nextToken))
 			else
 				i -= 1 -- getCond skips the identifier
-				addExpr(FunctionCallExpr(token, token, parseCond(getCond())))
+				local cond = getCond()
+				addExpr(FunctionCallExpr(token, token, parseCond(cond)))
 			end
 		elseif token.kind == "NUMBER" then
 			-- number is at the start of an expression, it could be:
@@ -504,11 +546,12 @@ local function parse(tokens: { Token }): { Expr }
 			else
 				-- binop
 				i = advance
+				local cond = getCond()
 				addExpr(BinOpExpr(
 					token,
-					IdentifierExpr(token),
+					NumberExpr(token),
 					-- get condition tokens as rhs
-					parseCond(getCond()),
+					parseCond(cond),
 					nextToken
 				))
 			end
@@ -533,7 +576,7 @@ local function parse(tokens: { Token }): { Expr }
 				i = advance
 				addExpr(BinOpExpr(
 					token,
-					IdentifierExpr(token),
+					StringExpr(token),
 					-- get condition tokens as rhs
 					parseCond(getCond()),
 					nextToken
