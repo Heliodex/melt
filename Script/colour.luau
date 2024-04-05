@@ -15,35 +15,35 @@ local reset = style "reset"
 
 local Colour = {}
 
-function Colour.blue(str: string)
+function Colour.blue(str: string | number)
 	return blue .. str .. reset
 end
 
-function Colour.green(str: string)
+function Colour.green(str: string | number)
 	return green .. str .. reset
 end
 
-function Colour.purple(str: string)
+function Colour.purple(str: string | number)
 	return purple .. str .. reset
 end
 
-function Colour.red(str: string)
+function Colour.red(str: string | number)
 	return red .. str .. reset
 end
 
-function Colour.yellow(str: string)
+function Colour.yellow(str: string | number)
 	return yellow .. str .. reset
 end
 
-function Colour.cyan(str: string)
+function Colour.cyan(str: string | number)
 	return cyan .. str .. reset
 end
 
-function Colour.bold(str: string)
+function Colour.bold(str: string | number)
 	return bold .. str .. reset
 end
 
-function Colour.dim(str: string)
+function Colour.dim(str: string | number)
 	return dim .. str .. reset
 end
 

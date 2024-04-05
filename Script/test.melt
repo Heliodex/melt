@@ -1,2 +1,6 @@
-y = if x is 6
+y = if x is 6:
 	print "yes"
+	print "test"
+else
+	print "no"
+	print "test"

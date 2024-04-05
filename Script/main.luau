@@ -6,6 +6,7 @@ local colour = require "colour"
 
 type TokenKind =
 	"INDENT"
+	| "DEDENT"
 	| "SPACE"
 	| "NEWLINE"
 	| "IDENTIFIER"
@@ -15,19 +16,23 @@ type TokenKind =
 	| "TEXTOPERATOR"
 	| "EQUALS"
 	| "PLUS"
-	| "PLUSPLUS"
-	| "PLUSEQUALS"
 	| "MINUS"
-	| "MINUSMINUS"
-	| "MINUSEQUALS"
 	| "TIMES"
 	| "DIVIDE"
 	| "MODULO"
+	| "EXPONENT"
+	| "COLON"
+	| "SEMICOLON"
+	| "LPAREN"
+	| "RPAREN"
+	| "LBRACE"
+	| "RBRACE"
+	| "LBRACKET"
+	| "RBRACKET"
 
 type ExprKind =
 	"block"
 	| "if"
-	| "elseif"
 	| "else"
 	| "binop"
 	| "postfix"
@@ -38,7 +43,6 @@ type ExprKind =
 
 local keywords = {
 	["if"] = true,
-	["elseif"] = true,
 	["else"] = true,
 }
 
@@ -56,17 +60,10 @@ local binaryOperators = {
 	["not"] = true,
 	["="] = true,
 	["+"] = true,
-	["+="] = true,
 	["-"] = true,
-	["-="] = true,
 	["*"] = true,
 	["/"] = true,
 	["%"] = true,
-}
-
-local postfixOperators = {
-	["++"] = true,
-	["--"] = true,
 }
 
 type Token = {
@@ -93,57 +90,24 @@ local function BlockExpr(startToken: Token, expressions: { Expr }): BlockExpr
 	}
 end
 
-type ElseExpr = Expr & {
-	block: Expr,
-}
-
-local function ElseExpr(startToken: Token, block: BlockExpr): ElseExpr
-	return {
-		startToken = startToken,
-		kind = "else" :: ExprKind,
-		block = block,
-	}
-end
-
-type ElseIfExpr = Expr & {
-	condition: Expr,
-	block: BlockExpr,
-	next: (ElseIfExpr | ElseExpr)?,
-}
-
-local function ElseIfExpr(
-	startToken: Token,
-	condition: Expr,
-	block: BlockExpr,
-	next: (ElseIfExpr | ElseExpr)?
-): ElseIfExpr
-	return {
-		startToken = startToken,
-		kind = "elseif" :: ExprKind,
-		condition = condition,
-		block = block,
-		next = next,
-	}
-end
-
 type IfExpr = Expr & {
 	condition: Expr,
-	block: BlockExpr,
-	next: (ElseIfExpr | ElseExpr)?,
+	ifBlock: BlockExpr,
+	elseBlock: BlockExpr,
 }
 
 local function IfExpr(
 	startToken: Token,
 	condition: Expr,
-	block: BlockExpr,
-	next: (ElseIfExpr | ElseExpr)?
+	ifBlock: BlockExpr,
+	elseBlock: BlockExpr
 ): IfExpr
 	return {
 		startToken = startToken,
 		kind = "if" :: ExprKind,
 		condition = condition,
-		block = block,
-		next = next,
+		ifBlock = ifBlock,
+		elseBlock = elseBlock,
 	}
 end
 
@@ -315,8 +279,11 @@ local function generate(program: { Expr }): string
 			block ..= generate { ifexpr.condition }
 			block ..= " then\n"
 
-			block ..= indent(generate { ifexpr.block }, 1)
+			block ..= indent(generate { ifexpr.ifBlock }, 1)
 			block ..= "\n"
+
+			block ..= "else\n"
+			block ..= indent(generate { ifexpr.elseBlock }, 1)
 
 			block ..= "end"
 
@@ -335,25 +302,51 @@ local function generate(program: { Expr }): string
 			end
 			output ..= "return "
 			output ..= generate { block.expressions[b + 1] }
-		elseif kind == "postfix" then
-			local postfix = expr :: PostfixOpExpr
-			output ..= generate { postfix.expr }
-
-			local value = postfix.operator.value
-
-			if value == "++" then
-				output ..= " += 1\n"
-			elseif value == "--" then
-				output ..= " -= 1\n"
-			else
-				error(`unknown postfix operator {value}`)
-			end
 		else
 			error(`unknown expr kind {kind}`)
 		end
 	end
 
 	return output
+end
+
+local printIndent = 0
+
+local function printToken(token: Token)
+	local pos = `{token.line}:{token.column}`
+	while #pos < 5 do
+		pos ..= " "
+	end
+
+	local kind = token.kind
+	while #kind < 13 do
+		kind ..= " "
+	end
+
+	local value = token.value
+	if token.kind == "STRING" then
+		value = colour.green(`"{value}"`)
+	elseif token.kind == "NUMBER" then
+		value = colour.yellow(value)
+	elseif token.kind == "IDENTIFIER" then
+		value = colour.cyan(value)
+	elseif token.kind == "KEYWORD" then
+		value = colour.red(value)
+	elseif token.kind == "INDENT" then
+		value = "{"
+		printIndent += 1
+	elseif token.kind == "DEDENT" then
+		value = "}"
+		printIndent -= 1
+	elseif token.kind == "NEWLINE" or token.kind == "SPACE" then
+		value = ""
+	end
+
+	for _ = 1, printIndent - if token.kind == "INDENT" then 1 else 0 do
+		value = "  " .. value
+	end
+
+	print(pos, colour.blue(kind), colour.bold(value))
 end
 
 local function parse(tokens: { Token }): { Expr }
@@ -363,228 +356,116 @@ local function parse(tokens: { Token }): { Expr }
 		error(colour.red "no tokens to parse")
 	end
 
-	local function addExpr(expr: Expr)
-		table.insert(program, expr)
+	-- remove spaces and newlines
+	for i, token in tokens do
+		if token.kind == "SPACE" then
+			table.remove(tokens, i)
+		end
 	end
 
-	local i = 0
-	local len = #tokens
-	while i < len do
-		i += 1
-		local token = tokens[i]
-		local currentIndent = 0
+	-- A program is a list of expressions
 
-		local function getBlock(): { Token }
-			-- get tokens until the end of the block (which is the same indent level as the if statement)
-			local blockTokens: { Token } = {}
-			local blockIndent = 0
+	local function next(): Token
+		return tokens[1]
+	end
 
-			if #tokens == 0 then
-				error(colour.red "tried to get empty block")
+	local function get(): Token
+		local token = next()
+		table.remove(tokens, 1)
+		return token
+	end
+
+	local function eat(kind: TokenKind): Token
+		local token = get()
+		if token.kind ~= kind then
+			print(
+				colour.red "expected",
+				colour.yellow(kind),
+				colour.red "got",
+				colour.yellow(token.kind)
+			)
+			exit(1)
+		end
+		return token
+	end
+
+	local function canEndAnExpression(token: Token): boolean
+		local kind: TokenKind = token.kind
+		return kind == "IDENTIFIER"
+			or kind == "NUMBER"
+			or kind == "STRING"
+			or kind == "RPAREN"
+			or kind == "RBRACE"
+			or kind == "RBRACKET"
+	end
+
+	local function getIfExprCond(): { Token }
+		local tokens: { Token } = {}
+
+		local depth = 0
+		while true do
+			local token = get()
+			print("got token", token)
+			if token.kind == "COLON" and depth == 0 then
+				break
+			elseif token.kind == "KEYWORD" and token.value == "if" then
+				-- keywords that require a colon
+				depth += 1
 			end
-
-			while i < len do -- todo figure out if the + 1 breaks something or not its 5:57 am idck
-				if tokens[i].kind == "NEWLINE" then
-					blockIndent = 0
-					-- chock next few tokens to see if they're indented
-
-					local j = i + 1
-					while j < len and tokens[j].kind == "INDENT" do
-						blockIndent += 1
-						j += 1
-					end
-					if blockIndent <= currentIndent then
-						print "block finished"
-						break
-					end
-				end
-
-				table.insert(blockTokens, tokens[i])
-				i += 1
-			end
-
-			if i >= len then
-				print "welp"
-			end
-
-			if #blockTokens == 0 then
-				error(colour.red "empty block")
-			end
-
-			print(blockTokens)
-
-			return blockTokens
+			table.insert(tokens, token)
 		end
 
-		local function getCond(): { Token }
-			local condTokens: { Token } = {}
+		return tokens
+	end
 
-			-- get all tokens until the end of the line
-			while i < len and tokens[i + 1].kind ~= "NEWLINE" do
-				i += 1
-				table.insert(condTokens, tokens[i])
+	local function getUntilEndOfExpression(): { Token }
+		local tokens: { Token } = {}
+
+		-- just because a token can end an expression doesn't mean it does
+		local startToken = next()
+
+		if startToken.kind == "KEYWORD" then
+			if startToken.value == "if" then
+				-- skip the if keyword
+				get()
+				-- first get the condition
+				local conditionTokens = getIfExprCond()
+				print("Got tokns", conditionTokens)
 			end
-
-			return condTokens
+		else
+			print(
+				colour.red "unimplemented token",
+				colour.yellow(startToken.kind)
+			)
+			exit(1)
 		end
 
-		local function nextNonSpace(): (Token, number)
-			local j = i
-			while j < len and tokens[j].kind == "SPACE" do
-				j += 1
+		return tokens
+	end
+
+	while #tokens > 0 do
+		local token = get()
+
+		printToken(token)
+
+		if token.kind == "IDENTIFIER" then
+			local nextToken = get()
+
+			if binaryOperators[nextToken.value] then
+				-- binary operator
+				local left = IdentifierExpr(token)
+				local operator = nextToken
+
+				local rightTokens = getUntilEndOfExpression()
+				local right = parse(rightTokens)[1]
+
+				print(operator)
+
+				table.insert(program, BinOpExpr(token, left, right, operator))
 			end
-			return tokens[j], j
-		end
-
-		local function parseCond(condTokens: { Token }): Expr
-			print("parsing cond", condTokens)
-			error("bruh")
-
-			local cond = parse(condTokens)
-
-			if #cond > 1 then
-				error(colour.red "too many exprs in cond")
-			elseif #cond < 1 then
-				error(colour.red "not enough exprs in cond")
-			end
-
-			return cond[1]
-		end
-
-		if token.kind == "INDENT" then
-			currentIndent += 1
-		elseif token.kind == "NEWLINE" then
-			currentIndent = 0
-		elseif token.kind == "KEYWORD" then
-			if token.value == "if" then
-				print(i)
-				local cond = getCond()
-				print(i)
-
-				local block = getBlock()
-
-				local expr = IfExpr(
-					token,
-					parseCond(cond),
-					BlockExpr(token, parse(block))
-				)
-				addExpr(expr)
-				-- elseif token.value == "elseif" then
-				-- 	local cond = getCond()
-				-- 	-- skip the newline
-				-- 	i += 1
-				-- 	local block = getBlock()
-				-- 	addExpr(
-				-- 		ElseIfExpr(
-				-- 			token,
-				-- 			parseCond(cond),
-				-- 			BlockExpr(token, parse(block))
-				-- 		)
-				-- 	)
-				-- elseif token.value == "else" then
-				-- 	-- skip newline
-				-- 	i += 1
-
-				-- 	local block = getBlock()
-				-- 	addExpr(ElseExpr(token, BlockExpr(token, parse(block))))
-				-- else
-				-- 	print(token)
-				-- 	error(colour.red "unknown token value " .. token.value)
-			end
-		elseif token.kind == "IDENTIFIER" then
-			-- identifier is at the start of an expression, it could be:
-			-- 1: a binop (next token is a text operator or operator
-			-- 3: a postfix op (next token is ++ or --)
-			-- 4: a function call
-			-- 5: standalone
-			-- after one 2am philosophical compiler thinking session, I've concluded that yes, an assignment is indeed a binop
-
-			-- skip the identifier
-			i += 1
-			local nextToken, advance = nextNonSpace()
-
-			if not nextToken then
-				-- standalone
-				i = advance
-				addExpr(IdentifierExpr(token))
-			elseif binaryOperators[nextToken.value] then
-				-- binop
-				i = advance
-				local cond = getCond()
-				addExpr(BinOpExpr(
-					token,
-					IdentifierExpr(token),
-					-- get condition tokens as rhs
-					parseCond(cond),
-					nextToken
-				))
-			elseif postfixOperators[nextToken.value] then
-				-- postfix
-				i = advance
-				addExpr(PostfixOpExpr(token, IdentifierExpr(token), nextToken))
-			else
-				i -= 1 -- getCond skips the identifier
-				local cond = getCond()
-				addExpr(FunctionCallExpr(token, token, parseCond(cond)))
-			end
-		elseif token.kind == "NUMBER" then
-			-- number is at the start of an expression, it could be:
-			-- 1: a binop (next token is a text operator or operator
-			-- 2: standalone
-
-			-- skip the number
-			i += 1
-			local nextToken, advance = nextNonSpace()
-
-			local function standalone()
-				i = advance
-				addExpr(NumberExpr(token))
-			end
-
-			if not nextToken or not binaryOperators[nextToken.value] then
-				standalone()
-			else
-				-- binop
-				i = advance
-				local cond = getCond()
-				addExpr(BinOpExpr(
-					token,
-					NumberExpr(token),
-					-- get condition tokens as rhs
-					parseCond(cond),
-					nextToken
-				))
-			end
-		elseif token.kind == "STRING" then
-			-- string is at the start of an expression, it could be:
-			-- 1: a binop (next token is a text operator or operator
-			-- 2: standalone
-
-			-- skip the string
-			i += 1
-			local nextToken, advance = nextNonSpace()
-
-			local function standalone()
-				i = advance
-				addExpr(StringExpr(token))
-			end
-
-			if not nextToken or not binaryOperators[nextToken.value] then
-				standalone()
-			else
-				-- binop
-				i = advance
-				addExpr(BinOpExpr(
-					token,
-					StringExpr(token),
-					-- get condition tokens as rhs
-					parseCond(getCond()),
-					nextToken
-				))
-			end
-		elseif token.kind ~= "SPACE" then
-			print(token)
-			error(colour.red "unknown token kind " .. token.kind)
+		else
+			print(colour.red "unexpected token", colour.yellow(token.kind))
+			exit(1)
 		end
 	end
 
@@ -598,6 +479,7 @@ local function lex(source: { string }): { Token }
 		return tokens[#tokens - (n - 1)]
 	end
 	local line, column = 1, 0
+	local indent = 0
 
 	local function addToken(
 		kind: TokenKind,
@@ -631,23 +513,28 @@ local function lex(source: { string }): { Token }
 			addToken("SPACE", " ")
 		elseif char == "\t" then
 			-- only if last line is a newline or an indent
-			if last(1).kind == "NEWLINE" or last(1).kind == "INDENT" then
-				addToken("INDENT", "\t")
-				column += 3
-			else
+			if last(1).kind ~= "NEWLINE" and last(1).kind ~= "INDENT" then
 				addToken("SPACE", "\t")
+				continue
 			end
-		elseif char == ";" then
-			-- parse till end of line
-			i += 1 -- skip the semicolon
-			while i < len and source[i] ~= "\n" do
-				column += 1
+
+			-- count how many tabs there are
+			local tabs = 1
+			while source[i + tabs] == "\t" do
+				tabs += 1
 				i += 1
 			end
-			column -= 1
-			i -= 1
 
-			-- I used to do something with it here but nah
+			local diff = tabs - indent
+			for _ = 1, math.abs(diff) do
+				if diff > 0 then
+					addToken("INDENT", "\t")
+					indent += 1
+				else
+					addToken("DEDENT", "\t")
+					indent -= 1
+				end
+			end
 		elseif char == '"' then
 			local startLine, startColumn = line, column
 
@@ -668,37 +555,33 @@ local function lex(source: { string }): { Token }
 
 			addToken("STRING", stringLiteral, startLine, startColumn)
 		elseif char == "+" then
-			-- check if it's a ++ or a += or just a +
-			if i + 1 < len and source[i + 1] == "+" then
-				addToken("PLUSPLUS", "++")
-				i += 1
-				column += 1
-			elseif i + 1 < len and source[i + 1] == "=" then
-				addToken("PLUSEQUALS", "+=")
-				i += 1
-				column += 1
-			else
-				addToken("PLUS", "+")
-			end
+			addToken("PLUS", "+")
 		elseif char == "-" then
-			-- check if it's a -- or a -= or just a -
-			if i + 1 < len and source[i + 1] == "-" then
-				addToken("MINUSMINUS", "--")
-				i += 1
-				column += 1
-			elseif i + 1 < len and source[i + 1] == "=" then
-				addToken("MINUSEQUALS", "-=")
-				i += 1
-				column += 1
-			else
-				addToken("MINUS", "-")
-			end
+			addToken("MINUS", "-")
 		elseif char == "*" then
 			addToken("TIMES", "*")
 		elseif char == "/" then
 			addToken("DIVIDE", "/")
 		elseif char == "%" then
 			addToken("MODULO", "%")
+		elseif char == "^" then
+			addToken("EXPONENT", "^")
+		elseif char == ":" then
+			addToken("COLON", ":")
+		elseif char == ";" then
+			addToken("SEMICOLON", ";")
+		elseif char == "(" then
+			addToken("LPAREN", "(")
+		elseif char == ")" then
+			addToken("RPAREN", ")")
+		elseif char == "{" then
+			addToken("LBRACE", "{")
+		elseif char == "}" then
+			addToken("RBRACE", "}")
+		elseif char == "[" then
+			addToken("LBRACKET", "[")
+		elseif char == "]" then
+			addToken("RBRACKET", "]")
 		elseif char ~= " " then
 			if char >= "0" and char <= "9" then
 				local startLine, startColumn = line, column
@@ -774,6 +657,36 @@ local function lex(source: { string }): { Token }
 				exit(1)
 			end
 		end
+	end
+
+	-- postprocessing
+
+	-- remove leading and trailing newlines
+	while tokens[1].kind == "NEWLINE" do
+		table.remove(tokens, 1)
+	end
+	while tokens[#tokens].kind == "NEWLINE" do
+		table.remove(tokens, #tokens)
+	end
+
+	-- check if the number of indents and dedents are the same, if not add the remaining
+	local indents, dedents = 0, 0
+	for _, token in tokens do
+		if token.kind == "INDENT" then
+			indents += 1
+		elseif token.kind == "DEDENT" then
+			dedents += 1
+		end
+	end
+	if dedents > indents then
+		-- huh?????
+		print(colour.red "too many dedents")
+		exit(1)
+	end
+
+	while indents > dedents do
+		addToken("DEDENT", "\t")
+		dedents += 1
 	end
 
 	return tokens
