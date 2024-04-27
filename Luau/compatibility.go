@@ -132,7 +132,7 @@ func compatifyCode(sourceCode []byte, tree *sitter.Tree) string {
 	return sourceString
 }
 
-func compatify(filename string) {
+func compatifyFile(filename string) {
 	binding := luau.GetLuau()
 	sourceCode, err := os.ReadFile(filename)
 	if err != nil {

@@ -27,11 +27,11 @@ func main() {
 		if len(args) < 3 {
 			Error("No file specified.")
 		}
-		format(args[2])
+		formatFile(args[2])
 	case "c", "compatibility":
 		if len(args) < 3 {
 			Error("No file specified.")
 		}
-		compatify(args[2])
+		compatifyFile(args[2])
 	}
 }
