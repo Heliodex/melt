@@ -1,3 +1,3 @@
 # melt
 
-Backwards-compatible tooling for Roblox development
+Backwards-compatible tooling for Roblox, Luau, and Mercury development
